@@ -213,18 +213,31 @@ const Canvas: React.FC<CanvasProps> = ({
           // Draw Tap (Dot)
           const point = path.points[0];
           if (!point) return;
+
+          // 選択中の場合は外側に微細なパルスリングを描画
+          if (path.isSelected) {
+            ctx.beginPath();
+            ctx.arc(point.x, point.y, 14, 0, Math.PI * 2);
+            ctx.fillStyle = path.color + "18";
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(point.x, point.y, 9, 0, Math.PI * 2);
+            ctx.fillStyle = path.color + "30";
+            ctx.fill();
+          }
+
           ctx.beginPath();
-          ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
-          ctx.fillStyle = path.color + "40"; // Transparent fill
+          ctx.arc(point.x, point.y, 6, 0, Math.PI * 2);
+          ctx.fillStyle = path.color + (path.isSelected ? "60" : "30"); // Transparent fill
           ctx.fill();
-          ctx.lineWidth = path.isSelected ? 2 : 1;
+          ctx.lineWidth = path.isSelected ? 2.5 : 1.5;
           ctx.strokeStyle = path.color;
           ctx.stroke();
 
           // Dot
           ctx.beginPath();
-          ctx.arc(point.x, point.y, 2, 0, Math.PI * 2);
-          ctx.fillStyle = path.color;
+          ctx.arc(point.x, point.y, 2.5, 0, Math.PI * 2);
+          ctx.fillStyle = path.isSelected ? "#ffffff" : path.color;
           ctx.fill();
 
           // Draw Label
@@ -253,14 +266,14 @@ const Canvas: React.FC<CanvasProps> = ({
             }
           }
           ctx.strokeStyle = path.color;
-          ctx.lineWidth = path.isSelected ? 2 : 1;
+          ctx.lineWidth = path.isSelected ? 2.5 : 1.5;
           ctx.stroke();
 
           // Draw Start/End Points (Override per path if defined, otherwise use global)
           const shouldShowPoints =
             path.showPoints !== undefined ? path.showPoints : showPoints;
           if (shouldShowPoints) {
-            const pointRadius = path.isSelected ? 4 : 2.5; // Smaller for non-selected
+            const pointRadius = path.isSelected ? 4.5 : 3; // Smaller for non-selected
 
             // Start Point (Green)
             const pStart = path.points[0];
@@ -269,6 +282,11 @@ const Canvas: React.FC<CanvasProps> = ({
               ctx.beginPath();
               ctx.arc(pStart.x, pStart.y, pointRadius, 0, Math.PI * 2);
               ctx.fill();
+              if (path.isSelected) {
+                ctx.strokeStyle = "#ffffff";
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+              }
             }
 
             // End Point (Red)
@@ -278,6 +296,11 @@ const Canvas: React.FC<CanvasProps> = ({
               ctx.beginPath();
               ctx.arc(pEnd.x, pEnd.y, pointRadius, 0, Math.PI * 2);
               ctx.fill();
+              if (path.isSelected) {
+                ctx.strokeStyle = "#ffffff";
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+              }
             }
           }
 
@@ -318,17 +341,30 @@ const Canvas: React.FC<CanvasProps> = ({
         ctx.globalAlpha = 1.0; // Reset alpha
       });
 
-      // Draw playback marker if present
+      // Draw playback marker if present (with Ripple touch feedback)
       const allMarkers = [...markerPositions];
       if (markerPosition) allMarkers.push(markerPosition);
 
       if (allMarkers.length > 0) {
         allMarkers.forEach((pos) => {
+          // 外側の波紋リング 1 (広域)
           ctx.beginPath();
-          ctx.arc(pos.x, pos.y, 6, 0, Math.PI * 2);
-          ctx.fillStyle = "rgba(59, 130, 246, 0.8)"; // blue-500
+          ctx.arc(pos.x, pos.y, 22, 0, Math.PI * 2);
+          ctx.fillStyle = "rgba(59, 130, 246, 0.15)";
           ctx.fill();
-          ctx.strokeStyle = "white";
+
+          // 外側の波紋リング 2 (中間)
+          ctx.beginPath();
+          ctx.arc(pos.x, pos.y, 14, 0, Math.PI * 2);
+          ctx.fillStyle = "rgba(59, 130, 246, 0.3)";
+          ctx.fill();
+
+          // 内側コアマーカー
+          ctx.beginPath();
+          ctx.arc(pos.x, pos.y, 6.5, 0, Math.PI * 2);
+          ctx.fillStyle = "#2563eb"; // blue-600
+          ctx.fill();
+          ctx.strokeStyle = "#ffffff";
           ctx.lineWidth = 2;
           ctx.stroke();
         });
@@ -343,9 +379,9 @@ const Canvas: React.FC<CanvasProps> = ({
           ctx.beginPath();
           ctx.moveTo(conn.from.x, conn.from.y);
           ctx.lineTo(conn.to.x, conn.to.y);
-          ctx.strokeStyle = conn.isSelected ? "#10B981" : "#9ca3af";
+          ctx.strokeStyle = conn.isSelected ? "#10B981" : "#94a3b8";
           ctx.setLineDash([5, 5]);
-          ctx.lineWidth = conn.isSelected ? 2 : 1;
+          ctx.lineWidth = conn.isSelected ? 2 : 1.2;
           ctx.stroke();
           ctx.setLineDash([]); // Reset
 

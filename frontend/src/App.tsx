@@ -1,6 +1,9 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { arrayMove } from "@dnd-kit/sortable";
+import { Play, Square, Maximize, Minimize } from "lucide-react";
 import Canvas from "./components/Canvas";
+import DeviceFrame from "./components/DeviceFrame";
+import CanvasHUD from "./components/CanvasHUD";
 import ControlPanel from "./components/ControlPanel";
 import Sidebar from "./components/Sidebar";
 import ProjectMenu from "./components/ProjectMenu";
@@ -825,6 +828,13 @@ function App() {
   const [scale, setScale] = useState<number>(() =>
     loadState<number>("scale", 0.6),
   );
+  const [showDeviceFrame, setShowDeviceFrame] = useState<boolean>(() =>
+    loadState<boolean>("showDeviceFrame", true),
+  );
+
+  useEffect(() => {
+    saveState("showDeviceFrame", showDeviceFrame);
+  }, [showDeviceFrame]);
 
   const [backgroundImage, setBackgroundImage] = useState<string | null>(null);
 
@@ -1018,6 +1028,13 @@ function App() {
   // Remove unused state
   // const [showSettingsPopup, setShowSettingsPopup] = useState<boolean>(false);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [playbackProgress, setPlaybackProgress] = useState<{
+    elapsed: number;
+    totalDuration: number;
+    activeStrokeIndex: number;
+    totalStrokes: number;
+    percent: number;
+  } | null>(null);
 
   const [markerPositions, setMarkerPositions] = useState<Point[]>([]);
 
@@ -1112,7 +1129,7 @@ function App() {
         }
       }
 
-      const totalDuration = currentTime;
+      const totalDuration = Math.max(0.1, currentTime);
 
       const animate = (time: number) => {
         if (startTimeRef.current === null) {
@@ -1124,16 +1141,21 @@ function App() {
         if (elapsed >= totalDuration) {
           setIsPlaying(false);
           setMarkerPositions([]);
+          setPlaybackProgress(null);
           startTimeRef.current = null;
           return;
         }
 
         const currentMarkers: Point[] = [];
+        let currentActiveStrokeIdx = 0;
 
         // Check each block in timeline
         for (const block of timeline) {
           if (elapsed >= block.startTime && elapsed < block.startTime + block.duration) {
             // This block is active
+            if (block.items.length > 0) {
+              currentActiveStrokeIdx = block.items[0].strokeIndex;
+            }
             block.items.forEach(item => {
               const localElapsed = elapsed - block.startTime;
               if (localElapsed < item.duration) {
@@ -1151,9 +1173,6 @@ function App() {
                     y: p1.y + (p2.y - p1.y) * t,
                   });
                 }
-              } else {
-                // Stroke finished within block - stick to last point if grouped?
-                // For simplicity, just don't add marker if finished.
               }
             });
             break; // found the active block
@@ -1161,6 +1180,14 @@ function App() {
         }
 
         setMarkerPositions(currentMarkers);
+        setPlaybackProgress({
+          elapsed: Math.min(elapsed, totalDuration),
+          totalDuration,
+          activeStrokeIndex: currentActiveStrokeIdx + 1,
+          totalStrokes: selectedCommand.strokes.length,
+          percent: Math.min(100, Math.max(0, (elapsed / totalDuration) * 100)),
+        });
+
         animationRef.current = requestAnimationFrame(animate);
       };
 
@@ -1169,7 +1196,10 @@ function App() {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }
-      setTimeout(() => setMarkerPositions([]), 0);
+      setTimeout(() => {
+        setMarkerPositions([]);
+        setPlaybackProgress(null);
+      }, 0);
       startTimeRef.current = null;
     }
 
@@ -1192,6 +1222,33 @@ function App() {
     }
     return model;
   }, [selectedModelId, orientation]);
+
+  // 画面全体に合わせる (Fit to Screen) 処理
+  const handleFitToScreen = useCallback(() => {
+    if (!scrollContainerRef.current) return;
+    const container = scrollContainerRef.current;
+    // 画面余白（padding: 128px）を考慮した描画可能領域
+    const availWidth = Math.max(100, container.clientWidth - 120);
+    const availHeight = Math.max(100, container.clientHeight - 120);
+
+    const scaleX = availWidth / selectedDevice.width;
+    const scaleY = availHeight / selectedDevice.height;
+    const optimalScale = Math.min(scaleX, scaleY);
+    // 0.2 〜 2.0 に制限し、小数点第2位で丸める
+    const clamped = Math.min(2.0, Math.max(0.2, Math.round(optimalScale * 100) / 100));
+
+    setScale(clamped);
+    saveState("scale", clamped);
+
+    // スクロールを中央に合わせる
+    setTimeout(() => {
+      if (scrollContainerRef.current) {
+        const c = scrollContainerRef.current;
+        c.scrollLeft = (c.scrollWidth - c.clientWidth) / 2;
+        c.scrollTop = (c.scrollHeight - c.clientHeight) / 2;
+      }
+    }, 50);
+  }, [selectedDevice]);
 
   // Helper for path resampling
   const resamplePath = (points: Point[], dur: number): Point[] => {
@@ -3337,134 +3394,148 @@ function App() {
             className="absolute inset-0 overflow-auto bg-gray-50/50"
           >
             <div className="min-w-full min-h-full w-max h-max flex items-center justify-center p-16">
-              <Canvas
+              <DeviceFrame
+                category={selectedDevice.category}
+                modelId={selectedDevice.id}
+                modelName={selectedDevice.name}
                 width={selectedDevice.width}
                 height={selectedDevice.height}
-                backgroundImage={backgroundImage}
-                paths={canvasPaths}
-                showGrid={showGrid}
-                showPoints={showPoints}
-                onPathDrag={handlePathDrag}
-                onPan={(dx, dy) => {
-                  if (scrollContainerRef.current) {
-                    // dx, dy は Canvas 側で計算された物理ピクセルの移動量
-                    scrollContainerRef.current.scrollLeft -= dx;
-                    scrollContainerRef.current.scrollTop -= dy;
-                  }
-                }}
-                onSelectCommand={(_, cmdId, pathId) => {
-                  let strokeIndex: number | null = null;
-                  if (pathId) {
-                    const match = pathId.match(/_stroke_(\d+)$/);
-                    if (match) {
-                      strokeIndex = parseInt(match[1], 10);
-                    }
-                  }
-
-                  setActiveCommandId(cmdId);
-                  setSelectedStrokeIndex(strokeIndex);
-                  // Also open settings if closed?
-                  if (!isRightSidebarOpen && !isFullscreen)
-                    setIsRightSidebarOpen(true);
-                }}
-                connections={canvasConnections.map((c) => ({
-                  ...c,
-                  isSelected:
-                    selectionType === "wait" &&
-                    selectedStrokeIndex === c.strokeIndex,
-                }))}
-                onSelectWait={(index) => {
-                  setSelectedStrokeIndex(index);
-                  setSelectionType("wait");
-                  if (!isRightSidebarOpen && !isFullscreen)
-                    setIsRightSidebarOpen(true);
-                }}
-                markerPositions={markerPositions}
                 scale={scale}
-              />
+                orientation={orientation}
+                showFrame={showDeviceFrame}
+              >
+                <Canvas
+                  width={selectedDevice.width}
+                  height={selectedDevice.height}
+                  backgroundImage={backgroundImage}
+                  paths={canvasPaths}
+                  showGrid={showGrid}
+                  showPoints={showPoints}
+                  onPathDrag={handlePathDrag}
+                  onPan={(dx, dy) => {
+                    if (scrollContainerRef.current) {
+                      // dx, dy は Canvas 側で計算された物理ピクセルの移動量
+                      scrollContainerRef.current.scrollLeft -= dx;
+                      scrollContainerRef.current.scrollTop -= dy;
+                    }
+                  }}
+                  onSelectCommand={(_, cmdId, pathId) => {
+                    let strokeIndex: number | null = null;
+                    if (pathId) {
+                      const match = pathId.match(/_stroke_(\d+)$/);
+                      if (match) {
+                        strokeIndex = parseInt(match[1], 10);
+                      }
+                    }
+
+                    setActiveCommandId(cmdId);
+                    setSelectedStrokeIndex(strokeIndex);
+                    // Also open settings if closed?
+                    if (!isRightSidebarOpen && !isFullscreen)
+                      setIsRightSidebarOpen(true);
+                  }}
+                  connections={canvasConnections.map((c) => ({
+                    ...c,
+                    isSelected:
+                      selectionType === "wait" &&
+                      selectedStrokeIndex === c.strokeIndex,
+                  }))}
+                  onSelectWait={(index) => {
+                    setSelectedStrokeIndex(index);
+                    setSelectionType("wait");
+                    if (!isRightSidebarOpen && !isFullscreen)
+                      setIsRightSidebarOpen(true);
+                  }}
+                  markerPositions={markerPositions}
+                  scale={scale}
+                />
+              </DeviceFrame>
             </div>
           </div>
 
-          {/* Overlay Play Controls (Floating) */}
-          <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 flex space-x-2 z-30">
-            <button
-              onClick={togglePlay}
-              className={`flex items-center space-x-2 px-5 py-2.5 rounded-full shadow-lg backdrop-blur-md border border-white/20 transition-all transform hover:scale-105 active:scale-95 ${
-                isPlaying
-                  ? "bg-red-500/90 text-white"
-                  : "bg-white/90 text-gray-800 hover:bg-white"
-              }`}
-            >
-              {isPlaying ? (
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-5 w-5"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              ) : (
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-5 w-5 ml-0.5"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
-                    clipRule="evenodd"
-                  />
-                </svg>
+          {/* Overlay Play Controls (Floating Player) */}
+          <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 flex items-center space-x-2 z-30 select-none">
+            <div className="flex items-center space-x-2 bg-white/90 backdrop-blur-md shadow-xl border border-gray-200/80 rounded-full px-3 py-1.5 transition-all duration-200 hover:shadow-2xl">
+              {/* 再生 / 停止ボタン */}
+              <button
+                type="button"
+                onClick={togglePlay}
+                disabled={!selectedCommand || selectedCommand.strokes.length === 0}
+                className={`flex items-center space-x-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold shadow-sm transition-all transform active:scale-95 ${
+                  !selectedCommand || selectedCommand.strokes.length === 0
+                    ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                    : isPlaying
+                      ? "bg-red-500 hover:bg-red-600 text-white shadow-red-200"
+                      : "bg-blue-600 hover:bg-blue-700 text-white shadow-blue-200"
+                }`}
+                title={
+                  !selectedCommand
+                    ? "コマンドを選択してください"
+                    : isPlaying
+                      ? "停止"
+                      : "再生"
+                }
+              >
+                {isPlaying ? (
+                  <Square className="w-3.5 h-3.5 fill-current" />
+                ) : (
+                  <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
+                )}
+                <span>{isPlaying ? "停止" : "再生"}</span>
+              </button>
+
+              {/* 再生中のプログレス表示 */}
+              {isPlaying && playbackProgress && (
+                <div className="flex items-center space-x-2 pl-1 pr-1.5 animate-in fade-in duration-150">
+                  <div className="flex flex-col gap-0.5 min-w-[120px]">
+                    <div className="flex items-center justify-between text-[10px] font-medium text-gray-500">
+                      <span>
+                        アクション {playbackProgress.activeStrokeIndex} / {playbackProgress.totalStrokes}
+                      </span>
+                      <span>
+                        {playbackProgress.elapsed.toFixed(1)}s / {playbackProgress.totalDuration.toFixed(1)}s
+                      </span>
+                    </div>
+                    <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-blue-500 rounded-full transition-all duration-75"
+                        style={{ width: `${playbackProgress.percent}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
               )}
-              <span className="font-medium text-sm">
-                {isPlaying ? "停止" : "再生"}
-              </span>
-            </button>
-            {/* Quick Fullscreen Toggle for center access */}
-            <button
-              onClick={handleToggleFullscreen}
-              className="p-2.5 bg-white/90 text-gray-600 rounded-full shadow-lg backdrop-blur-md border border-white/20 hover:bg-white transition-all transform hover:scale-105 active:scale-95"
-              title="全画面切替"
-            >
-              {isFullscreen ? (
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-5 w-5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              ) : (
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="h-5 w-5"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"
-                  />
-                </svg>
-              )}
-            </button>
+
+              {/* セパレーター */}
+              <div className="h-4 w-px bg-gray-200" />
+
+              {/* 全画面切り替えボタン */}
+              <button
+                type="button"
+                onClick={handleToggleFullscreen}
+                className="p-1.5 text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-full transition-colors active:scale-95"
+                title={isFullscreen ? "全画面解除" : "全画面表示"}
+              >
+                {isFullscreen ? (
+                  <Minimize className="w-4 h-4" />
+                ) : (
+                  <Maximize className="w-4 h-4" />
+                )}
+              </button>
+            </div>
           </div>
+
+          {/* Canvas HUD (Zoom, Fit, Frame Toggle) */}
+          <CanvasHUD
+            scale={scale}
+            onScaleChange={(newScale) => {
+              setScale(newScale);
+              saveState("scale", newScale);
+            }}
+            onFitToScreen={handleFitToScreen}
+            showDeviceFrame={showDeviceFrame}
+            onToggleDeviceFrame={() => setShowDeviceFrame((prev) => !prev)}
+          />
         </div>
       </div>
 
