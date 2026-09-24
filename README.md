@@ -4,7 +4,7 @@ iOS Voice Control（音声コントロール）のカスタムジェスチャー
 
 ## デモ
 
-🌐 **https://yossyaze.github.io/gesturio/**
+🌐 **https://yossyaze.github.io/Gesturio/**
 
 ## 機能
 
