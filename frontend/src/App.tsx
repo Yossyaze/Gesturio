@@ -3255,7 +3255,7 @@ function App() {
                 </svg>
               </button>
               <h1 className="font-semibold text-gray-700 tracking-tight hidden lg:block">
-                Voice Control Commander
+                Gesturio
               </h1>
               <div className="h-4 w-px bg-gray-200 hidden sm:block" />
               <ProjectMenu

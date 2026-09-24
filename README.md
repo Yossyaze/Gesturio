@@ -1,10 +1,10 @@
-# Voice Control Commander
+# Gesturio
 
-iOS Voice Control のカスタムジェスチャーコマンドを作成・編集する Web アプリケーションです。
+iOS Voice Control（音声コントロール）のカスタムジェスチャーコマンドを作成・編集する Web アプリケーションです。
 
 ## デモ
 
-🌐 **https://yossyaze.github.io/voice-control-commander/**
+🌐 **https://yossyaze.github.io/gesturio/**
 
 ## 機能
 

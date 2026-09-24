@@ -1,5 +1,5 @@
 ---
-description: Voice Control Commander アプリケーション（フロントエンドのみ）を起動する手順
+description: Gesturio アプリケーション（フロントエンドのみ）を起動する手順
 ---
 
 > **注意**: バックエンド (`backend/`) は現在使用されていません。
@@ -8,4 +8,4 @@ description: Voice Control Commander アプリケーション（フロントエ�
 
 1. フロントエンド開発サーバーを起動します。`frontend` ディレクトリで実行します。
    // turbo
-2. Run `npm run dev` in `/Users/kasugaiakira/Desktop/voice-control-commander/frontend`
+2. Run `npm run dev` in `frontend`
