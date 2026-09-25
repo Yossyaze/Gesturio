@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { Point } from "../api";
+import { isTapStroke } from "../utils/parser";
 
 interface PathData {
   id: string; // This is actually commandId in current usage, but we will clarify
@@ -195,19 +196,8 @@ const Canvas: React.FC<CanvasProps> = ({
         ctx.lineJoin = "round";
         ctx.globalAlpha = path.isSelected ? 1.0 : 0.6; // Slightly transparent for non-selected
 
-        // Check if it's a Tap (single point OR multiple points at same location)
-        const isTap =
-          path.points.length === 1 ||
-          (Array.isArray(path.points) &&
-            path.points.length > 0 &&
-            path.points[0] &&
-            path.points.every(
-              (p) =>
-                p &&
-                path.points[0] &&
-                Math.abs(p.x - path.points[0].x) < 0.1 &&
-                Math.abs(p.y - path.points[0].y) < 0.1,
-            ));
+        // Check if it's a Tap
+        const isTap = isTapStroke(path.points);
 
         if (isTap) {
           // Draw Tap (Dot)
@@ -520,13 +510,7 @@ const Canvas: React.FC<CanvasProps> = ({
     // Check selected path first
     const selectedPath = paths.find((p) => p.isSelected);
     if (selectedPath && onPathDrag) {
-      const isTap =
-        selectedPath.points.length === 1 ||
-        selectedPath.points.every(
-          (p) =>
-            Math.abs(p.x - selectedPath.points[0].x) < 0.1 &&
-            Math.abs(p.y - selectedPath.points[0].y) < 0.1,
-        );
+      const isTap = isTapStroke(selectedPath.points);
 
       let type: "move" | "start" | "end" | null = null;
       if (isTap) {
@@ -626,13 +610,7 @@ const Canvas: React.FC<CanvasProps> = ({
     // Update cursor based on hover
     const selectedPath = paths.find((p) => p.isSelected);
     if (selectedPath) {
-      const isTap =
-        selectedPath.points.length === 1 ||
-        selectedPath.points.every(
-          (p) =>
-            Math.abs(p.x - selectedPath.points[0].x) < 0.1 &&
-            Math.abs(p.y - selectedPath.points[0].y) < 0.1,
-        );
+      const isTap = isTapStroke(selectedPath.points);
 
       if (isTap) {
         if (isPointNear(pos, selectedPath.points[0], 15)) {
@@ -719,18 +697,7 @@ const Canvas: React.FC<CanvasProps> = ({
       const path = paths[i];
       if (path.points.length === 0) continue;
 
-      const isTap =
-        path.points.length === 1 ||
-        (Array.isArray(path.points) &&
-          path.points.length > 0 &&
-          path.points[0] &&
-          path.points.every(
-            (p) =>
-              p &&
-              path.points[0] &&
-              Math.abs(p.x - path.points[0].x) < 0.1 &&
-              Math.abs(p.y - path.points[0].y) < 0.1,
-          ));
+      const isTap = isTapStroke(path.points);
 
       if (isTap) {
         // Check hit on Tap (Dot)

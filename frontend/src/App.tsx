@@ -29,6 +29,7 @@ import {
   deleteBackground,
   updateBackgroundGroup,
 } from "./api";
+import { isTapStroke } from "./utils/parser";
 
 // Define Device Model Interface
 interface DeviceModel {
@@ -1098,7 +1099,7 @@ function App() {
             ? metadata.tapDuration
             : (selectedCommand.tapDuration || 0.05);
 
-        const strokeDuration = s.length === 1 
+        const strokeDuration = isTapStroke(s) 
           ? strokeTapDuration 
           : Math.max(0.1, (s.length - 1) / 60);
 
@@ -1256,7 +1257,7 @@ function App() {
     // targetCount = (所要時間 * 60フレーム) + 1 (始点分)
     // これにより、最後の点がちょうど dur 秒の地点になる。
     const targetCount = Math.max(2, Math.round(dur * 60) + 1);
-    if (points.length === 1) return Array(targetCount).fill(points[0]);
+    if (points.length === 1 || isTapStroke(points)) return Array(targetCount).fill(points[0]);
     if (points.length === 2) {
       const start = points[0];
       const end = points[1];
@@ -1920,8 +1921,8 @@ function App() {
       ) {
         // Specific stroke
         const s = selectedCommand.strokes[selectedStrokeIndex];
-        // For tap (length 1), use tapDuration
-        if (s.length === 1) {
+        // For tap, use tapDuration
+        if (isTapStroke(s)) {
           const strokeTapDuration = 
             selectedCommand.strokeMetadata?.[selectedStrokeIndex]?.tapDuration;
           return strokeTapDuration !== undefined 
@@ -1939,7 +1940,12 @@ function App() {
         let total = 0;
         selectedCommand.strokes.forEach((s, i) => {
           if (i > 0) total += waitTime;
-          total += Math.max(0.1, (s.length - 1) / 60);
+          if (isTapStroke(s)) {
+            const metaTap = selectedCommand.strokeMetadata?.[i]?.tapDuration;
+            total += metaTap !== undefined ? metaTap : (selectedCommand.tapDuration || 0.05);
+          } else {
+            total += Math.max(0.1, (s.length - 1) / 60);
+          }
         });
         return Math.round(total * 100) / 100;
       }
@@ -3065,12 +3071,12 @@ function App() {
   const isTap = useMemo(() => {
     if (!selectedCommand) return false;
     // If the whole command is a single tap, treat as tap even if not explicitly selected
-    if (selectedCommand.strokes.length === 1 && selectedCommand.strokes[0].length === 1) {
+    if (selectedCommand.strokes.length === 1 && isTapStroke(selectedCommand.strokes[0])) {
       return true;
     }
     if (selectionType === "stroke" && selectedStrokeIndex !== null) {
       const stroke = selectedCommand.strokes[selectedStrokeIndex];
-      return stroke && stroke.length === 1;
+      return stroke ? isTapStroke(stroke) : false;
     }
     return false;
   }, [selectedCommand, selectionType, selectedStrokeIndex]);

@@ -17,6 +17,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { Command, Point } from "../api";
+import { isTapStroke } from "../utils/parser";
 
 interface SidebarProps {
   commands: Command[];
@@ -93,7 +94,7 @@ interface SortableStrokeItemProps {
 }
 
 // Helper to determine if tap
-const isTap = (points: Point[]): boolean => points.length <= 1;
+const isTap = (points: Point[]): boolean => isTapStroke(points);
 
 const SortableStrokeItem = React.memo(
   ({

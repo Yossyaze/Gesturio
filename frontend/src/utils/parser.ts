@@ -19,10 +19,26 @@ export interface ParsedCommand {
   name: string;
   points: Point[];
   strokes: Point[][];
+  strokeMetadata?: { waitAfter?: number; groupId?: string; tapDuration?: number }[];
+  tapDuration?: number;
+  waitDuration?: number;
 }
 
 export interface ParseResult {
   commands: ParsedCommand[];
+}
+
+/**
+ * ストロークがタップ（単一の打鍵・接触）であるかを判定する。
+ * 1点のみ、または手ブレ等による微小な移動（4px未満）のポイント群をタップと判定する。
+ */
+export function isTapStroke(points: Point[]): boolean {
+  if (!points || points.length === 0) return false;
+  if (points.length === 1) return true;
+  const p0 = points[0];
+  return points.every(
+    (p) => p && Math.abs(p.x - p0.x) < 4.0 && Math.abs(p.y - p0.y) < 4.0,
+  );
 }
 
 // --- NSKeyedUnarchiver ヘルパー ---
@@ -97,23 +113,98 @@ function unarchiveObject(obj: unknown, objects: unknown[]): unknown {
   return obj;
 }
 
+/**
+ * bplist-creator 等のライブラリのバグで、オブジェクト数が256以上の際に
+ * UIDマーカーが本来 0x81 であるべきところ 0x80 で出力されてしまう現象を修復する。
+ */
+function sanitizeBplist(buf: Uint8Array): Uint8Array {
+  if (!buf || buf.length < 32) return buf;
+
+  // 末尾32バイトのトレーラーを解析
+  const trailerStart = buf.length - 32;
+  const offsetIntSize = buf[trailerStart + 6];
+
+  let numObjects = 0;
+  for (let i = 0; i < 8; i++) {
+    numObjects = numObjects * 256 + buf[trailerStart + 8 + i];
+  }
+
+  let offsetTableOffset = 0;
+  for (let i = 0; i < 8; i++) {
+    offsetTableOffset = offsetTableOffset * 256 + buf[trailerStart + 24 + i];
+  }
+
+  if (
+    numObjects <= 0 ||
+    offsetTableOffset <= 0 ||
+    offsetTableOffset >= buf.length ||
+    offsetIntSize <= 0
+  ) {
+    return buf;
+  }
+
+  const copy = new Uint8Array(buf);
+
+  for (let i = 0; i < numObjects; i++) {
+    const offPos = offsetTableOffset + i * offsetIntSize;
+    if (offPos + offsetIntSize > copy.length) break;
+
+    let off = 0;
+    for (let b = 0; b < offsetIntSize; b++) {
+      off = (off << 8) | copy[offPos + b];
+    }
+
+    let nextOff = 0;
+    if (i === numObjects - 1) {
+      nextOff = offsetTableOffset;
+    } else {
+      const nextPos = offPos + offsetIntSize;
+      if (nextPos + offsetIntSize > copy.length) break;
+      for (let b = 0; b < offsetIntSize; b++) {
+        nextOff = (nextOff << 8) | copy[nextPos + b];
+      }
+    }
+
+    const len = nextOff - off;
+    // 0x80 かつ長さが3バイト（2バイト値のUIDなのに0x80になっているもの）を 0x81 に修復
+    if (copy[off] === 0x80 && len === 3) {
+      copy[off] = 0x81;
+    }
+  }
+
+  return copy;
+}
+
 // --- ジェスチャーデータの解析 ---
 
+interface ParsedGestureData {
+  strokes: Point[][];
+  strokeMetadata: {
+    waitAfter?: number;
+    groupId?: string;
+    tapDuration?: number;
+  }[];
+  tapDuration?: number;
+  waitDuration?: number;
+}
+
 /**
- * CustomGesture バイナリ（NSKeyedArchiver 形式）からストローク座標を抽出する。
- * Python 版 parse_gesture_data() と同等。
+ * CustomGesture バイナリ（NSKeyedArchiver 形式）からストローク座標およびタイミング情報を抽出する。
  */
-function parseGestureData(gestureBytes: Uint8Array): Point[][] {
+function parseGestureData(gestureBytes: Uint8Array): ParsedGestureData {
   try {
-    const parsed = bplistParser.parseBuffer(gestureBytes);
-    if (!parsed || parsed.length === 0) return [];
+    const sanitized = sanitizeBplist(gestureBytes);
+    const parsed = bplistParser.parseBuffer(Buffer.from(sanitized));
+    if (!parsed || parsed.length === 0) {
+      return { strokes: [], strokeMetadata: [] };
+    }
 
     const root = parsed[0];
 
     if (root["$objects"]) {
       const objects = root["$objects"] as unknown[];
       const rootUid = root["$top"]?.root;
-      if (!rootUid) return [];
+      if (!rootUid) return { strokes: [], strokeMetadata: [] };
 
       const rootObj = unarchiveObject(rootUid, objects) as Record<
         string,
@@ -128,39 +219,78 @@ function parseGestureData(gestureBytes: Uint8Array): Point[][] {
         }
       }
 
-      const strokes: Point[][] = [];
-      let currentStroke: Point[] = [];
-      let lastTime: number | null = null;
-
       const pointPattern = /\{([\d.]+),\s*([\d.]+)\}/;
+
+      // 1. 各グループ（同時タッチを含むストローク群）を順次抽出
+      interface RawStroke {
+        points: Point[];
+        startTime: number;
+        endTime: number;
+        groupId?: string;
+      }
+
+      const rawStrokes: RawStroke[] = [];
+      let currentGroupTouches = new Map<string, Point[]>();
+      let groupStartTime: number | null = null;
+      let groupLastTime: number | null = null;
+      let lastGroupEndTime: number | null = null;
+      const groupWaits: number[] = [];
+
+      const flushGroup = (touchUpTime?: number) => {
+        if (currentGroupTouches.size === 0) return;
+        const endTime = touchUpTime ?? groupLastTime ?? groupStartTime ?? 0;
+        const entries = Array.from(currentGroupTouches.entries());
+        const isMulti = entries.length > 1;
+        const groupId = isMulti
+          ? "group-" + Math.random().toString(36).slice(2, 8)
+          : undefined;
+
+        entries.forEach(([, pts]) => {
+          rawStrokes.push({
+            points: pts,
+            startTime: groupStartTime ?? 0,
+            endTime: endTime,
+            groupId: groupId,
+          });
+        });
+
+        lastGroupEndTime = endTime;
+        currentGroupTouches.clear();
+        groupStartTime = null;
+        groupLastTime = null;
+      };
 
       for (const event of events) {
         const timeVal = typeof event["Time"] === "number" ? event["Time"] : 0;
+        const fingers = (event["Fingers"] || {}) as Record<string, unknown>;
+        const fingerEntries = Object.entries(fingers);
 
-        // ストロークの境界を検出（時間差 > 0.1秒）
-        if (lastTime !== null && timeVal - lastTime > 0.1) {
-          if (currentStroke.length > 0) {
-            strokes.push(currentStroke);
-            currentStroke = [];
-          }
+        // A. 指を離したイベント（Touch Up: Fingers が空）
+        if (fingerEntries.length === 0) {
+          flushGroup(timeVal);
+          continue;
         }
-        lastTime = timeVal;
 
-        // Fingers からポイントを抽出
-        const fingers = event["Fingers"];
-        if (!fingers || typeof fingers !== "object") continue;
+        // B. 前回のイベントから 0.1秒以上の空白がある場合（Touch Up が省略されたケースへの対応）
+        if (groupLastTime !== null && timeVal - groupLastTime > 0.1) {
+          flushGroup(groupLastTime);
+        }
 
-        const fingerValues = Array.isArray(fingers)
-          ? fingers
-          : Object.values(fingers as Record<string, unknown>);
+        if (groupStartTime === null) {
+          if (lastGroupEndTime !== null) {
+            groupWaits.push(Math.max(0.01, timeVal - lastGroupEndTime));
+          }
+          groupStartTime = timeVal;
+        }
+        groupLastTime = timeVal;
 
-        for (const f of fingerValues) {
+        // 各指のポイントを収集
+        for (const [tId, f] of fingerEntries) {
           let pointStr: string | null = null;
 
           if (typeof f === "string") {
             pointStr = f;
           } else if (f && typeof f === "object") {
-            // 再帰的に NS.pointval を探索
             const stack: unknown[] = [f];
             while (stack.length > 0) {
               const curr = stack.pop();
@@ -184,7 +314,10 @@ function parseGestureData(gestureBytes: Uint8Array): Point[][] {
           if (pointStr) {
             const match = pointPattern.exec(pointStr);
             if (match) {
-              currentStroke.push({
+              if (!currentGroupTouches.has(tId)) {
+                currentGroupTouches.set(tId, []);
+              }
+              currentGroupTouches.get(tId)!.push({
                 x: parseFloat(match[1]),
                 y: parseFloat(match[2]),
               });
@@ -193,18 +326,74 @@ function parseGestureData(gestureBytes: Uint8Array): Point[][] {
         }
       }
 
-      if (currentStroke.length > 0) {
-        strokes.push(currentStroke);
+      flushGroup(groupLastTime ?? undefined);
+
+      // 2. タップ判定・ストロークの正規化とメタデータ構築
+      const finalStrokes: Point[][] = [];
+      const strokeMetadata: {
+        waitAfter?: number;
+        groupId?: string;
+        tapDuration?: number;
+      }[] = [];
+      let detectedTapDuration: number | undefined = undefined;
+      let totalWait = 0;
+      let waitCount = 0;
+
+      for (let i = 0; i < rawStrokes.length; i++) {
+        const s = rawStrokes[i];
+        const pts = s.points;
+        if (pts.length === 0) continue;
+
+        // タップ判定（1点、または全点間の最大距離が4px未満の微小ブレ）
+        const isTap = isTapStroke(pts);
+
+        let strokePoints = pts;
+        let tapDur: number | undefined = undefined;
+
+        if (isTap) {
+          strokePoints = [pts[0]]; // 1点に集約
+          const dur = s.endTime - s.startTime;
+          tapDur = dur > 0.005 ? parseFloat(dur.toFixed(3)) : 0.05;
+          detectedTapDuration = tapDur;
+        }
+
+        const waitAfter =
+          i < rawStrokes.length - 1
+            ? groupWaits[i] !== undefined
+              ? parseFloat(groupWaits[i].toFixed(2))
+              : 0.1
+            : undefined;
+
+        if (waitAfter !== undefined) {
+          totalWait += waitAfter;
+          waitCount++;
+        }
+
+        finalStrokes.push(strokePoints);
+        strokeMetadata.push({
+          waitAfter,
+          groupId: s.groupId,
+          tapDuration: tapDur,
+        });
       }
 
-      return strokes;
+      const avgWait =
+        waitCount > 0
+          ? parseFloat((totalWait / waitCount).toFixed(2))
+          : undefined;
+
+      return {
+        strokes: finalStrokes,
+        strokeMetadata,
+        tapDuration: detectedTapDuration,
+        waitDuration: avgWait,
+      };
     }
 
-    // フォールバック: 単純な plist
-    return [];
+    return { strokes: [], strokeMetadata: [] };
   } catch (e) {
     console.error("ジェスチャーデータの解析エラー:", e);
-    return [];
+    return { strokes: [], strokeMetadata: [] };
   }
 }
 
@@ -221,7 +410,7 @@ export function parseVoiceControlCommands(content: ArrayBuffer): ParseResult {
   // まずバイナリ plist として解析を試みる
   try {
     const buf = new Uint8Array(content);
-    const parsed = bplistParser.parseBuffer(buf);
+    const parsed = bplistParser.parseBuffer(Buffer.from(buf));
     if (parsed && parsed.length > 0) {
       pl = parsed[0];
     } else {
@@ -264,7 +453,8 @@ export function parseVoiceControlCommands(content: ArrayBuffer): ParseResult {
         continue;
       }
 
-      const strokes = parseGestureData(gestureData);
+      const parsedGesture = parseGestureData(gestureData);
+      const strokes = parsedGesture.strokes;
 
       // コマンド名を取得
       let commandName = "Unknown";
@@ -286,6 +476,9 @@ export function parseVoiceControlCommands(content: ArrayBuffer): ParseResult {
         name: commandName,
         points: firstStroke,
         strokes,
+        strokeMetadata: parsedGesture.strokeMetadata,
+        tapDuration: parsedGesture.tapDuration,
+        waitDuration: parsedGesture.waitDuration,
       });
     }
   }
