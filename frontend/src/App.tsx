@@ -990,6 +990,12 @@ function App() {
 
   // --- localStorage への自動保存 ---
   useEffect(() => {
+    saveState("currentProjectId", currentProjectId);
+  }, [currentProjectId]);
+  useEffect(() => {
+    saveState("currentProjectName", currentProjectName);
+  }, [currentProjectName]);
+  useEffect(() => {
     saveState("commands", commands);
   }, [commands]);
   useEffect(() => {
