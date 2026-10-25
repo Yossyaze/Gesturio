@@ -30,15 +30,20 @@ import {
   updateBackgroundGroup,
 } from "./api";
 import { isTapStroke } from "./utils/parser";
-
-// Define Device Model Interface
-interface DeviceModel {
-  id: string;
-  name: string;
-  width: number;
-  height: number;
-  category: "iPhone" | "iPad";
-}
+import { DEVICE_MODELS, getNextColor } from "./constants/devices";
+import {
+  resamplePath,
+  calculateAngle,
+  calculateLength,
+  rotateStrokePoints,
+  scaleStrokePoints,
+  curveStrokePoints,
+  straightenStrokePoints,
+  flipStrokePoints,
+  flipStrokeAnglePoints,
+  displaceStrokePoints,
+} from "./utils/geometry";
+import { usePlayback } from "./hooks/usePlayback";
 
 interface ActionClipboard {
   stroke: Point[];
@@ -48,429 +53,6 @@ interface ActionClipboard {
 const revokeBackgroundUrls = (backgrounds: BackgroundImage[]) => {
   backgrounds.forEach((bg) => URL.revokeObjectURL(bg.url));
 };
-
-// Comprehensive List of Apple Devices
-const DEVICE_MODELS: DeviceModel[] = [
-  // iPhone 16 Series
-  {
-    id: "iphone_16_pro_max",
-    name: "iPhone 16 Pro Max",
-    width: 440,
-    height: 956,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_16_pro",
-    name: "iPhone 16 Pro",
-    width: 402,
-    height: 874,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_16_plus",
-    name: "iPhone 16 Plus",
-    width: 430,
-    height: 932,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_16",
-    name: "iPhone 16",
-    width: 393,
-    height: 852,
-    category: "iPhone",
-  },
-
-  // iPhone 15 Series
-  {
-    id: "iphone_15_pro_max",
-    name: "iPhone 15 Pro Max",
-    width: 430,
-    height: 932,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_15_pro",
-    name: "iPhone 15 Pro",
-    width: 393,
-    height: 852,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_15_plus",
-    name: "iPhone 15 Plus",
-    width: 430,
-    height: 932,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_15",
-    name: "iPhone 15",
-    width: 393,
-    height: 852,
-    category: "iPhone",
-  },
-
-  // iPhone 14 Series
-  {
-    id: "iphone_14_pro_max",
-    name: "iPhone 14 Pro Max",
-    width: 430,
-    height: 932,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_14_pro",
-    name: "iPhone 14 Pro",
-    width: 393,
-    height: 852,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_14_plus",
-    name: "iPhone 14 Plus",
-    width: 428,
-    height: 926,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_14",
-    name: "iPhone 14",
-    width: 390,
-    height: 844,
-    category: "iPhone",
-  },
-
-  // iPhone 13 Series
-  {
-    id: "iphone_13_pro_max",
-    name: "iPhone 13 Pro Max",
-    width: 428,
-    height: 926,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_13_pro",
-    name: "iPhone 13 Pro",
-    width: 390,
-    height: 844,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_13",
-    name: "iPhone 13",
-    width: 390,
-    height: 844,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_13_mini",
-    name: "iPhone 13 mini",
-    width: 375,
-    height: 812,
-    category: "iPhone",
-  },
-
-  // iPhone 12 Series
-  {
-    id: "iphone_12_pro_max",
-    name: "iPhone 12 Pro Max",
-    width: 428,
-    height: 926,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_12_pro",
-    name: "iPhone 12 Pro",
-    width: 390,
-    height: 844,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_12",
-    name: "iPhone 12",
-    width: 390,
-    height: 844,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_12_mini",
-    name: "iPhone 12 mini",
-    width: 375,
-    height: 812,
-    category: "iPhone",
-  },
-
-  // iPhone 11 Series
-  {
-    id: "iphone_11_pro_max",
-    name: "iPhone 11 Pro Max",
-    width: 414,
-    height: 896,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_11_pro",
-    name: "iPhone 11 Pro",
-    width: 375,
-    height: 812,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_11",
-    name: "iPhone 11",
-    width: 414,
-    height: 896,
-    category: "iPhone",
-  },
-
-  // iPhone XS/XR/X
-  {
-    id: "iphone_xs_max",
-    name: "iPhone XS Max",
-    width: 414,
-    height: 896,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_xs",
-    name: "iPhone XS",
-    width: 375,
-    height: 812,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_xr",
-    name: "iPhone XR",
-    width: 414,
-    height: 896,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_x",
-    name: "iPhone X",
-    width: 375,
-    height: 812,
-    category: "iPhone",
-  },
-
-  // iPhone 8/7/SE
-  {
-    id: "iphone_8_plus",
-    name: "iPhone 8 Plus",
-    width: 414,
-    height: 736,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_8",
-    name: "iPhone 8",
-    width: 375,
-    height: 667,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_7_plus",
-    name: "iPhone 7 Plus",
-    width: 414,
-    height: 736,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_7",
-    name: "iPhone 7",
-    width: 375,
-    height: 667,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_se_3",
-    name: "iPhone SE (3rd gen)",
-    width: 375,
-    height: 667,
-    category: "iPhone",
-  },
-  {
-    id: "iphone_se_2",
-    name: "iPhone SE (2nd gen)",
-    width: 375,
-    height: 667,
-    category: "iPhone",
-  },
-
-  // iPad Pro
-  {
-    id: "ipad_pro_13_m4",
-    name: 'iPad Pro 13" (M4)',
-    width: 1032,
-    height: 1376,
-    category: "iPad",
-  },
-  {
-    id: "ipad_pro_12_9_6",
-    name: 'iPad Pro 12.9" (3rd-6th gen)',
-    width: 1024,
-    height: 1366,
-    category: "iPad",
-  },
-  {
-    id: "ipad_pro_12_9_2",
-    name: 'iPad Pro 12.9" (1st-2nd gen)',
-    width: 1024,
-    height: 1366,
-    category: "iPad",
-  },
-  {
-    id: "ipad_pro_11_m4",
-    name: 'iPad Pro 11" (M4)',
-    width: 834,
-    height: 1210,
-    category: "iPad",
-  },
-  {
-    id: "ipad_pro_11_4",
-    name: 'iPad Pro 11" (1st-4th gen)',
-    width: 834,
-    height: 1194,
-    category: "iPad",
-  },
-  {
-    id: "ipad_pro_10_5",
-    name: 'iPad Pro 10.5"',
-    width: 834,
-    height: 1112,
-    category: "iPad",
-  },
-  {
-    id: "ipad_pro_9_7",
-    name: 'iPad Pro 9.7"',
-    width: 768,
-    height: 1024,
-    category: "iPad",
-  },
-
-  // iPad Air
-  {
-    id: "ipad_air_13_m2",
-    name: 'iPad Air 13" (M2)',
-    width: 1032,
-    height: 1376,
-    category: "iPad",
-  },
-  {
-    id: "ipad_air_11_m2",
-    name: 'iPad Air 11" (M2)',
-    width: 820,
-    height: 1180,
-    category: "iPad",
-  },
-  {
-    id: "ipad_air_5",
-    name: "iPad Air (5th gen)",
-    width: 820,
-    height: 1180,
-    category: "iPad",
-  },
-  {
-    id: "ipad_air_4",
-    name: "iPad Air (4th gen)",
-    width: 820,
-    height: 1180,
-    category: "iPad",
-  },
-  {
-    id: "ipad_air_3",
-    name: "iPad Air (3rd gen)",
-    width: 834,
-    height: 1112,
-    category: "iPad",
-  },
-
-  // iPad
-  {
-    id: "ipad_10",
-    name: "iPad (10th gen)",
-    width: 820,
-    height: 1180,
-    category: "iPad",
-  },
-  {
-    id: "ipad_9",
-    name: "iPad (9th gen)",
-    width: 810,
-    height: 1080,
-    category: "iPad",
-  },
-  {
-    id: "ipad_8",
-    name: "iPad (8th gen)",
-    width: 810,
-    height: 1080,
-    category: "iPad",
-  },
-  {
-    id: "ipad_7",
-    name: "iPad (7th gen)",
-    width: 810,
-    height: 1080,
-    category: "iPad",
-  },
-  {
-    id: "ipad_6",
-    name: "iPad (6th gen)",
-    width: 768,
-    height: 1024,
-    category: "iPad",
-  },
-  {
-    id: "ipad_5",
-    name: "iPad (5th gen)",
-    width: 768,
-    height: 1024,
-    category: "iPad",
-  },
-
-  // iPad mini
-  {
-    id: "ipad_mini_6",
-    name: "iPad mini (6th gen)",
-    width: 744,
-    height: 1133,
-    category: "iPad",
-  },
-  {
-    id: "ipad_mini_5",
-    name: "iPad mini (5th gen)",
-    width: 768,
-    height: 1024,
-    category: "iPad",
-  },
-];
-
-const COMMAND_COLORS = [
-  "#ef4444", // Red 500
-  "#f97316", // Orange 500
-  "#f59e0b", // Amber 500
-  "#84cc16", // Lime 500
-  "#10b981", // Emerald 500
-  "#06b6d4", // Cyan 500
-  "#3b82f6", // Blue 500
-  "#6366f1", // Indigo 500
-  "#8b5cf6", // Violet 500
-  "#d946ef", // Fuchsia 500
-  "#f43f5e", // Rose 500
-  "#dc2626", // Red 600
-  "#ea580c", // Orange 600
-  "#d97706", // Amber 600
-  "#65a30d", // Lime 600
-  "#059669", // Emerald 600
-  "#0891b2", // Cyan 600
-  "#2563eb", // Blue 600
-  "#4f46e5", // Indigo 600
-  "#7c3aed", // Violet 600
-  "#c026d3", // Fuchsia 600
-  "#e11d48", // Rose 600
-];
 
 // --- localStorage ヘルパー ---
 const STORAGE_KEY = "voiceControlCommander";
@@ -746,15 +328,6 @@ function App() {
     setSavedCommandsJSON(JSON.stringify([]));
   };
 
-  // Helper to get next color
-  const getNextColor = (currentCommands: Command[]) => {
-    const usedColors = new Set(currentCommands.map((c) => c.color));
-    for (const color of COMMAND_COLORS) {
-      if (!usedColors.has(color)) return color;
-    }
-    return COMMAND_COLORS[currentCommands.length % COMMAND_COLORS.length];
-  };
-
   // --- 一時的な状態 (永続化しない) ---
   const [activeCommandId, setActiveCommandId] = useState<string | null>(null);
   const [checkedCommandIds, setCheckedCommandIds] = useState<Set<string>>(
@@ -794,7 +367,6 @@ function App() {
     setFutureLevels([]);
   }, []);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const handleUndo = () => {
     if (pastLevels.length === 0) return;
     const previousState = pastLevels[pastLevels.length - 1];
@@ -810,7 +382,6 @@ function App() {
     }
   };
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const handleRedo = () => {
     if (futureLevels.length === 0) return;
     const nextState = futureLevels[0];
@@ -1032,26 +603,15 @@ function App() {
     saveState("favoriteEnvironments", favoriteEnvironments);
   }, [favoriteEnvironments]);
 
-  // Remove unused state
-  // const [showSettingsPopup, setShowSettingsPopup] = useState<boolean>(false);
-  const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [playbackProgress, setPlaybackProgress] = useState<{
-    elapsed: number;
-    totalDuration: number;
-    activeStrokeIndex: number;
-    totalStrokes: number;
-    percent: number;
-  } | null>(null);
-
-  const [markerPositions, setMarkerPositions] = useState<Point[]>([]);
-
   const appRef = useRef<HTMLDivElement>(null);
-  const animationRef = useRef<number | null>(null);
-  const startTimeRef = useRef<number | null>(null);
 
   const selectedCommand = useMemo(() => {
     return commands.find((c) => c.id === activeCommandId);
   }, [commands, activeCommandId]);
+
+  // 再生アニメーションループ（カスタムフックに分離）
+  const { isPlaying, playbackProgress, markerPositions, togglePlay } =
+    usePlayback(selectedCommand);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -1076,150 +636,6 @@ function App() {
 
     return { x: Math.round(w / 2), y: Math.round(h / 2) };
   }, [selectedModelId, orientation]);
-
-  // Animation Loop
-  useEffect(() => {
-    if (isPlaying && selectedCommand) {
-      // Build Sequential Groups based on groupId
-      // Blocks of actions that start at the same time
-      const timeline: {
-        startTime: number;
-        duration: number;
-        items: {
-          strokeIndex: number;
-          duration: number;
-        }[];
-      }[] = [];
-
-      let currentTime = 0;
-      const waitTime = selectedCommand.waitDuration !== undefined ? selectedCommand.waitDuration : 0.1;
-
-      for (let i = 0; i < selectedCommand.strokes.length; i++) {
-        const metadata = selectedCommand.strokeMetadata?.[i];
-        const currentGroupId = metadata?.groupId;
-
-        // Determine duration for this stroke
-        const s = selectedCommand.strokes[i];
-        const strokeTapDuration = 
-          metadata?.tapDuration !== undefined
-            ? metadata.tapDuration
-            : (selectedCommand.tapDuration || 0.05);
-
-        const strokeDuration = isTapStroke(s) 
-          ? strokeTapDuration 
-          : Math.max(0.1, (s.length - 1) / 60);
-
-        if (currentGroupId && i > 0 && selectedCommand.strokeMetadata?.[i - 1]?.groupId === currentGroupId) {
-          // Part of existing group - append to the last timeline block
-          const lastBlock = timeline[timeline.length - 1];
-          lastBlock.items.push({ strokeIndex: i, duration: strokeDuration });
-          lastBlock.duration = Math.max(lastBlock.duration, strokeDuration);
-        } else {
-          // New group or sequential action
-          // Wait time before this block (unless first)
-          if (i > 0) {
-            const prevWait = selectedCommand.strokeMetadata?.[i - 1]?.waitAfter;
-            currentTime += (prevWait !== undefined ? prevWait : waitTime);
-          }
-
-          timeline.push({
-            startTime: currentTime,
-            duration: strokeDuration,
-            items: [{ strokeIndex: i, duration: strokeDuration }]
-          });
-        }
-
-        // If not grouped with next, currentTime advances by group duration
-        const nextGroupId = selectedCommand.strokeMetadata?.[i + 1]?.groupId;
-        if (!currentGroupId || currentGroupId !== nextGroupId) {
-          currentTime += timeline[timeline.length - 1].duration;
-        }
-      }
-
-      const totalDuration = Math.max(0.1, currentTime);
-
-      const animate = (time: number) => {
-        if (startTimeRef.current === null) {
-          startTimeRef.current = time;
-        }
-
-        const elapsed = (time - startTimeRef.current) / 1000;
-
-        if (elapsed >= totalDuration) {
-          setIsPlaying(false);
-          setMarkerPositions([]);
-          setPlaybackProgress(null);
-          startTimeRef.current = null;
-          return;
-        }
-
-        const currentMarkers: Point[] = [];
-        let currentActiveStrokeIdx = 0;
-
-        // Check each block in timeline
-        for (const block of timeline) {
-          if (elapsed >= block.startTime && elapsed < block.startTime + block.duration) {
-            // This block is active
-            if (block.items.length > 0) {
-              currentActiveStrokeIdx = block.items[0].strokeIndex;
-            }
-            block.items.forEach(item => {
-              const localElapsed = elapsed - block.startTime;
-              if (localElapsed < item.duration) {
-                const stroke = selectedCommand.strokes[item.strokeIndex];
-                const progress = localElapsed / item.duration;
-                if (stroke.length > 0) {
-                  const exactIndex = progress * (stroke.length - 1);
-                  const idx = Math.floor(exactIndex);
-                  const nextIdx = Math.min(idx + 1, stroke.length - 1);
-                  const t = exactIndex - idx;
-                  const p1 = stroke[idx];
-                  const p2 = stroke[nextIdx];
-                  currentMarkers.push({
-                    x: p1.x + (p2.x - p1.x) * t,
-                    y: p1.y + (p2.y - p1.y) * t,
-                  });
-                }
-              }
-            });
-            break; // found the active block
-          }
-        }
-
-        setMarkerPositions(currentMarkers);
-        setPlaybackProgress({
-          elapsed: Math.min(elapsed, totalDuration),
-          totalDuration,
-          activeStrokeIndex: currentActiveStrokeIdx + 1,
-          totalStrokes: selectedCommand.strokes.length,
-          percent: Math.min(100, Math.max(0, (elapsed / totalDuration) * 100)),
-        });
-
-        animationRef.current = requestAnimationFrame(animate);
-      };
-
-      animationRef.current = requestAnimationFrame(animate);
-    } else {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
-      setTimeout(() => {
-        setMarkerPositions([]);
-        setPlaybackProgress(null);
-      }, 0);
-      startTimeRef.current = null;
-    }
-
-    return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
-    };
-  }, [isPlaying, selectedCommand]);
-
-  const togglePlay = useCallback(() => {
-    setIsPlaying(!isPlaying);
-  }, [isPlaying]);
 
   const selectedDevice = useMemo(() => {
     const model =
@@ -1256,70 +672,6 @@ function App() {
       }
     }, 50);
   }, [selectedDevice]);
-
-  // Helper for path resampling
-  const resamplePath = (points: Point[], dur: number): Point[] => {
-    if (points.length === 0) return [];
-    // targetCount = (所要時間 * 60フレーム) + 1 (始点分)
-    // これにより、最後の点がちょうど dur 秒の地点になる。
-    const targetCount = Math.max(2, Math.round(dur * 60) + 1);
-    if (points.length === 1 || isTapStroke(points)) return Array(targetCount).fill(points[0]);
-    if (points.length === 2) {
-      const start = points[0];
-      const end = points[1];
-      const newPoints: Point[] = [];
-      for (let i = 0; i < targetCount; i++) {
-        const t = i / (targetCount - 1);
-        newPoints.push({
-          x: start.x + (end.x - start.x) * t,
-          y: start.y + (end.y - start.y) * t,
-        });
-      }
-      return newPoints;
-    }
-    // Complex path resampling
-    let totalLength = 0;
-    const segmentLengths: number[] = [];
-    for (let i = 0; i < points.length - 1; i++) {
-      const dx = points[i + 1].x - points[i].x;
-      const dy = points[i + 1].y - points[i].y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      segmentLengths.push(dist);
-      totalLength += dist;
-    }
-    if (totalLength === 0) return Array(targetCount).fill(points[0]);
-    const newPoints: Point[] = [points[0]];
-    const step = totalLength / (targetCount - 1);
-    let currentDist = 0;
-    let currentSegmentIndex = 0;
-
-    for (let i = 1; i < targetCount - 1; i++) {
-      const targetDist = i * step;
-      while (
-        currentSegmentIndex < segmentLengths.length &&
-        currentDist + segmentLengths[currentSegmentIndex] < targetDist
-      ) {
-        currentDist += segmentLengths[currentSegmentIndex];
-        currentSegmentIndex++;
-      }
-      if (currentSegmentIndex >= segmentLengths.length) {
-        newPoints.push(points[points.length - 1]);
-        continue;
-      }
-      const segmentStart = points[currentSegmentIndex];
-      const segmentEnd = points[currentSegmentIndex + 1];
-      const segmentLen = segmentLengths[currentSegmentIndex];
-      const distInSegment = targetDist - currentDist;
-      const t = distInSegment / segmentLen;
-      newPoints.push({
-        x: segmentStart.x + (segmentEnd.x - segmentStart.x) * t,
-        y: segmentStart.y + (segmentEnd.y - segmentStart.y) * t,
-      });
-    }
-    // 最後に必ず終点を追加
-    newPoints.push(points[points.length - 1]);
-    return newPoints;
-  };
 
   // Command Management
   const handleCreateNewCommand = () => {
@@ -1606,7 +958,7 @@ function App() {
   // selectedCommand moved up to fix scoping
   // const selectedCommand = ...
 
-  // Helper functions for geometric transformations
+  // 幾何学計算・変形用ヘルパー
   const getSelectedStrokePoints = useCallback((): Point[] | null => {
     if (!selectedCommand) return null;
     if (selectedStrokeIndex !== null) {
@@ -1619,29 +971,11 @@ function App() {
     return null;
   }, [selectedCommand, selectedStrokeIndex]);
 
-  const calculateAngle = (points: Point[]): number => {
-    if (points.length < 2) return 0;
-    const start = points[0];
-    const end = points[points.length - 1];
-    const dx = end.x - start.x;
-    const dy = end.y - start.y;
-    let angleRad = Math.atan2(dy, dx);
-    if (angleRad < 0) angleRad += 2 * Math.PI;
-    return Math.round((angleRad / (2 * Math.PI)) * 1024) % 1024;
-  };
-
-  const calculateLength = (points: Point[]): number => {
-    if (points.length < 2) return 0;
-    const start = points[0];
-    const end = points[points.length - 1];
-    return Math.sqrt(
-      Math.pow(end.x - start.x, 2) + Math.pow(end.y - start.y, 2),
-    );
-  };
-
-  const updateSelectedStroke = (newPoints: Point[]) => {
+  const updateSelectedStroke = (newPoints: Point[], saveHistory = true) => {
     if (!activeCommandId) return;
-    saveToHistory();
+    if (saveHistory) {
+      saveToHistory();
+    }
     setCommands((prev) =>
       prev.map((cmd) => {
         if (cmd.id !== activeCommandId) return cmd;
@@ -1659,30 +993,10 @@ function App() {
     );
   };
 
-  const handleAngleChange = (newAngleRaw: number) => {
+  const handleAngleChange = (newAngleRaw: number, saveHistory = true) => {
     const points = getSelectedStrokePoints();
     if (!points || points.length < 2) return;
-
-    const currentAngleRaw = calculateAngle(points);
-    const diffRaw = newAngleRaw - currentAngleRaw;
-    const diffRad = (diffRaw / 1024) * 2 * Math.PI;
-
-    const end = points[points.length - 1];
-    const pivot = { x: end.x, y: end.y };
-
-    const cos = Math.cos(diffRad);
-    const sin = Math.sin(diffRad);
-
-    const newPoints = points.map((p) => {
-      const dx = p.x - pivot.x;
-      const dy = p.y - pivot.y;
-      return {
-        x: pivot.x + (dx * cos - dy * sin),
-        y: pivot.y + (dx * sin + dy * cos),
-      };
-    });
-
-    updateSelectedStroke(newPoints);
+    updateSelectedStroke(rotateStrokePoints(points, newAngleRaw), saveHistory);
   };
 
   const handleDurationChange = (newDur: number) => {
@@ -1696,9 +1010,11 @@ function App() {
   };
 
   const handleNudge = useCallback(
-    (type: "x" | "y", delta: number) => {
+    (type: "x" | "y", delta: number, saveHistory = true) => {
       if (!activeCommandId) return;
-      saveToHistory();
+      if (saveHistory) {
+        saveToHistory();
+      }
       setCommands((prev) =>
         prev.map((cmd) => {
           if (cmd.id !== activeCommandId) return cmd;
@@ -1711,9 +1027,6 @@ function App() {
           }
           const newStrokes = cmd.strokes.map((stroke, i) => {
             if (strokesToUpdate.includes(i)) {
-              // Explicitly preserve length/duration by using resample or just map
-              // Mapping points 1:1 preserves count, which preserves duration.
-              // Just ensure we don't accidentally add/remove points.
               return stroke.map((p) => ({
                 x: type === "x" ? p.x + delta : p.x,
                 y: type === "y" ? p.y + delta : p.y,
@@ -1721,13 +1034,37 @@ function App() {
             }
             return stroke;
           });
-          const legacyPoints = (newStrokes.length > 0 && newStrokes[0].length > 0) ? newStrokes[0] : [];
+          const legacyPoints =
+            newStrokes.length > 0 && newStrokes[0].length > 0
+              ? newStrokes[0]
+              : [];
           return { ...cmd, strokes: newStrokes, points: legacyPoints };
         }),
       );
     },
     [activeCommandId, selectedStrokeIndex, saveToHistory],
   );
+
+  // プロパティパネルからの開始・終了座標の直接数値入力ハンドラー
+  const handleCoordinateChange = (
+    pointType: "start" | "end",
+    axis: "x" | "y",
+    value: number,
+  ) => {
+    const points = getSelectedStrokePoints();
+    if (!points || points.length === 0) return;
+
+    const targetPoint =
+      pointType === "start" ? points[0] : points[points.length - 1];
+    if (!targetPoint) return;
+
+    const deltaX = axis === "x" ? value - targetPoint.x : 0;
+    const deltaY = axis === "y" ? value - targetPoint.y : 0;
+    if (deltaX === 0 && deltaY === 0) return;
+
+    const newPoints = displaceStrokePoints(points, deltaX, deltaY, pointType);
+    updateSelectedStroke(newPoints, true);
+  };
 
   const handleCurve = () => {
     if (!activeCommandId) return;
@@ -1737,9 +1074,6 @@ function App() {
       prev.map((cmd) => {
         if (cmd.id !== activeCommandId) return cmd;
 
-        // Determine usage:
-        // If selectedStrokeIndex is set, curve only that one.
-        // If null, curve ALL strokes.
         const indicesToCurve =
           selectedStrokeIndex !== null
             ? [selectedStrokeIndex]
@@ -1748,46 +1082,13 @@ function App() {
         const newStrokes = cmd.strokes.map((stroke, index) => {
           if (!indicesToCurve.includes(index) || stroke.length < 2)
             return stroke;
-
-          const start = stroke[0];
-          const end = stroke[stroke.length - 1];
-          const pointCount = stroke.length;
-
-          const dx = end.x - start.x;
-          const dy = end.y - start.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-
-          if (dist < 1) return stroke;
-
-          // Randomize offset direction and magnitude (approx 30% of length)
-          const offset = dist * 0.3;
-          const angle = Math.atan2(dy, dx);
-          const perpAngle =
-            angle + (Math.random() > 0.5 ? Math.PI / 2 : -Math.PI / 2);
-
-          const midX = (start.x + end.x) / 2;
-          const midY = (start.y + end.y) / 2;
-
-          const controlX = midX + Math.cos(perpAngle) * offset;
-          const controlY = midY + Math.sin(perpAngle) * offset;
-
-          const newPoints: Point[] = [];
-          for (let i = 0; i < pointCount; i++) {
-            const t = i / (pointCount - 1);
-            const x =
-              (1 - t) * (1 - t) * start.x +
-              2 * (1 - t) * t * controlX +
-              t * t * end.x;
-            const y =
-              (1 - t) * (1 - t) * start.y +
-              2 * (1 - t) * t * controlY +
-              t * t * end.y;
-            newPoints.push({ x, y });
-          }
-          return newPoints;
+          return curveStrokePoints(stroke);
         });
 
-        const legacyPoints = (newStrokes.length > 0 && newStrokes[0].length > 0) ? newStrokes[0] : [];
+        const legacyPoints =
+          newStrokes.length > 0 && newStrokes[0].length > 0
+            ? newStrokes[0]
+            : [];
         return { ...cmd, strokes: newStrokes, points: legacyPoints };
       }),
     );
@@ -1809,23 +1110,13 @@ function App() {
         const newStrokes = cmd.strokes.map((stroke, index) => {
           if (!indicesToModify.includes(index) || stroke.length < 2)
             return stroke;
-
-          const start = stroke[0];
-          const end = stroke[stroke.length - 1];
-          const pointCount = Math.max(2, stroke.length);
-
-          const newPoints: Point[] = [];
-          for (let i = 0; i < pointCount; i++) {
-            const t = i / (pointCount - 1);
-            newPoints.push({
-              x: start.x + (end.x - start.x) * t,
-              y: start.y + (end.y - start.y) * t,
-            });
-          }
-          return newPoints;
+          return straightenStrokePoints(stroke);
         });
 
-        const legacyPoints = (newStrokes.length > 0 && newStrokes[0].length > 0) ? newStrokes[0] : [];
+        const legacyPoints =
+          newStrokes.length > 0 && newStrokes[0].length > 0
+            ? newStrokes[0]
+            : [];
         return { ...cmd, strokes: newStrokes, points: legacyPoints };
       }),
     );
@@ -1847,27 +1138,13 @@ function App() {
         const newStrokes = cmd.strokes.map((stroke, index) => {
           if (!indicesToModify.includes(index) || stroke.length === 0)
             return stroke;
-
-          let minX = Infinity,
-            maxX = -Infinity,
-            minY = Infinity,
-            maxY = -Infinity;
-          for (const p of stroke) {
-            if (p.x < minX) minX = p.x;
-            if (p.x > maxX) maxX = p.x;
-            if (p.y < minY) minY = p.y;
-            if (p.y > maxY) maxY = p.y;
-          }
-          const centerX = (minX + maxX) / 2;
-          const centerY = (minY + maxY) / 2;
-
-          return stroke.map((p) => ({
-            x: direction === "horizontal" ? centerX - (p.x - centerX) : p.x,
-            y: direction === "vertical" ? centerY - (p.y - centerY) : p.y,
-          }));
+          return flipStrokePoints(stroke, direction);
         });
 
-        const legacyPoints = (newStrokes.length > 0 && newStrokes[0].length > 0) ? newStrokes[0] : [];
+        const legacyPoints =
+          newStrokes.length > 0 && newStrokes[0].length > 0
+            ? newStrokes[0]
+            : [];
         return { ...cmd, strokes: newStrokes, points: legacyPoints };
       }),
     );
@@ -2059,27 +1336,7 @@ function App() {
     const stroke = selectedCommand.strokes[selectedStrokeIndex];
     if (stroke.length < 1) return;
 
-    // 軌跡を囲む枠（バウンディングボックス）の中心を計算
-    let minX = Infinity,
-      maxX = -Infinity,
-      minY = Infinity,
-      maxY = -Infinity;
-    for (const p of stroke) {
-      if (p.x < minX) minX = p.x;
-      if (p.x > maxX) maxX = p.x;
-      if (p.y < minY) minY = p.y;
-      if (p.y > maxY) maxY = p.y;
-    }
-    const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2;
-
-    // 中心点に対する点対称移動（180度回転）
-    const newPoints = stroke.map((p) => ({
-      x: 2 * centerX - p.x,
-      y: 2 * centerY - p.y,
-    }));
-
-    updateSelectedStroke(newPoints);
+    updateSelectedStroke(flipStrokeAnglePoints(stroke));
   };
 
   // ============================================================================
@@ -2356,11 +1613,13 @@ function App() {
     }
   };
 
-  const handleBatchDelete = () => {
+  const handleBatchDelete = async () => {
     if (checkedCommandIds.size === 0) return;
 
-    if (!confirm(`${checkedCommandIds.size} 件のコマンドを削除しますか？`))
-      return;
+    const confirmed = await confirm(
+      `${checkedCommandIds.size} 件のコマンドを削除しますか？`,
+    );
+    if (!confirmed) return;
 
     saveToHistory();
     setCommands((prev) => {
@@ -2644,7 +1903,6 @@ function App() {
   ) => {
     if (isPlaying) return;
 
-    // Use refined regex parsing to handle IDs like "uuid_stroke_0" safely vs "uuid_stroke_10"
     const match = id.match(/^(.*)_stroke_(\d+)$/);
     if (!match) return;
     const commandId = match[1];
@@ -2654,73 +1912,25 @@ function App() {
       prev.map((cmd: Command) => {
         if (cmd.id !== commandId) return cmd;
 
-        // If Command is selected (selectedStrokeIndex === null) and type is 'move', move ALL strokes
+        // コマンド全体選択時（selectedStrokeIndex === null）かつ全体移動のときは全ストロークを移動
         const isCommandMove = selectedStrokeIndex === null && type === "move";
 
         const newStrokes = cmd.strokes.map((stroke, index) => {
-          // Condition to update this specific stroke:
-          // 1. It's a "Command Move" (move all)
-          // 2. OR it's the specific target stroke (single edit)
           const shouldUpdate = isCommandMove || index === targetStrokeIndex;
-
           if (!shouldUpdate) return stroke;
 
-          // Apply modification
-          let newPoints = [...stroke];
-
           if (type === "move") {
-            newPoints = newPoints.map((p) => ({
-              x: p.x + deltaX,
-              y: p.y + deltaY,
-            }));
+            return displaceStrokePoints(stroke, deltaX, deltaY, "move");
           } else if (index === targetStrokeIndex) {
-            // 始点・終点のドラッグは単一ストロークに対してのみ適用
-            if (type === "start") {
-              const count = newPoints.length;
-              if (count >= 2) {
-                // 始点から終点に向けて線形に変位を減衰させて適用（ポイント数・所要時間を完全に保持）
-                newPoints = newPoints.map((p, i) => {
-                  const factor = 1 - i / (count - 1);
-                  return {
-                    x: p.x + deltaX * factor,
-                    y: p.y + deltaY * factor,
-                  };
-                });
-              } else if (count === 1) {
-                newPoints = [
-                  {
-                    x: newPoints[0].x + deltaX,
-                    y: newPoints[0].y + deltaY,
-                  },
-                ];
-              }
-            } else if (type === "end") {
-              const count = newPoints.length;
-              if (count >= 2) {
-                // 終点側に向けて線形に変位を適用（ポイント数・所要時間を完全に保持）
-                newPoints = newPoints.map((p, i) => {
-                  const factor = i / (count - 1);
-                  return {
-                    x: p.x + deltaX * factor,
-                    y: p.y + deltaY * factor,
-                  };
-                });
-              } else if (count === 1) {
-                newPoints = [
-                  {
-                    x: newPoints[0].x + deltaX,
-                    y: newPoints[0].y + deltaY,
-                  },
-                ];
-              }
-            }
+            return displaceStrokePoints(stroke, deltaX, deltaY, type);
           }
-          return newPoints;
+          return stroke;
         });
 
-        // Update legacy points for preview if first stroke changed
         const newLegacyPoints =
-          (newStrokes.length > 0 && newStrokes[0].length > 0) ? newStrokes[0] : cmd.points;
+          newStrokes.length > 0 && newStrokes[0].length > 0
+            ? newStrokes[0]
+            : cmd.points;
 
         return { ...cmd, strokes: newStrokes, points: newLegacyPoints };
       }),
@@ -2968,21 +2178,25 @@ function App() {
     }
   }, []);
 
-  // Keyboard Shortcuts
+  // キーボードショートカット
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if typing in an input
+      // 入力フィールドにフォーカスがある場合は無視
       if (
         e.target instanceof HTMLElement &&
-        (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")
+        (e.target.tagName === "INPUT" ||
+          e.target.tagName === "TEXTAREA" ||
+          e.target.tagName === "SELECT")
       ) {
         return;
       }
 
       const isMac = navigator.userAgent.toLowerCase().includes("mac");
       const isCmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
+      const key = e.key.toLowerCase();
 
-      if (isCmdOrCtrl && e.key.toLowerCase() === "z") {
+      // 元に戻す / やり直す (Cmd/Ctrl + Z / Cmd/Ctrl + Shift + Z)
+      if (isCmdOrCtrl && key === "z") {
         e.preventDefault();
         if (e.shiftKey) {
           handleRedo();
@@ -2992,27 +2206,96 @@ function App() {
         return;
       }
 
+      // プロジェクト保存 (Cmd/Ctrl + S)
+      if (isCmdOrCtrl && key === "s") {
+        e.preventDefault();
+        handleSaveProject();
+        return;
+      }
+
+      // コピー (Cmd/Ctrl + C)
+      if (isCmdOrCtrl && key === "c") {
+        e.preventDefault();
+        if (selectedStrokeIndex !== null) {
+          handleCopyAction(selectedStrokeIndex);
+        } else if (activeCommandId) {
+          handleCopyCommand(activeCommandId);
+        }
+        return;
+      }
+
+      // ペースト (Cmd/Ctrl + V)
+      if (isCmdOrCtrl && key === "v") {
+        e.preventDefault();
+        if (selectedStrokeIndex !== null && actionClipboard) {
+          handlePasteAction(selectedStrokeIndex);
+        } else if (commandClipboard) {
+          handlePasteCommand();
+        } else if (actionClipboard && activeCommandId) {
+          handlePasteAction();
+        }
+        return;
+      }
+
+      // 複製 (Cmd/Ctrl + D)
+      if (isCmdOrCtrl && key === "d") {
+        e.preventDefault();
+        if (activeCommandId && selectedStrokeIndex !== null) {
+          handleDuplicateStroke(activeCommandId, selectedStrokeIndex);
+        } else if (activeCommandId) {
+          handleDuplicateCommand(activeCommandId);
+        }
+        return;
+      }
+
+      // 選択中のアクション削除 (Delete / Backspace)
+      if (
+        (e.key === "Delete" || e.key === "Backspace") &&
+        selectedStrokeIndex !== null
+      ) {
+        e.preventDefault();
+        handleDeleteSelectedAction();
+        return;
+      }
+
+      // 再生 / 停止 (Space)
       if (e.code === "Space") {
         e.preventDefault();
         togglePlay();
-      } else if (e.code === "ArrowUp") {
+        return;
+      }
+
+      // 矢印キーによる位置調整（Shift押下時は10px移動、押しっぱなしリピート時は履歴の重複保存を防止）
+      const step = e.shiftKey ? 10 : 1;
+      const shouldSaveHistory = !e.repeat;
+      if (e.code === "ArrowUp") {
         e.preventDefault();
-        handleNudge("y", -1);
+        handleNudge("y", -step, shouldSaveHistory);
       } else if (e.code === "ArrowDown") {
         e.preventDefault();
-        handleNudge("y", 1);
+        handleNudge("y", step, shouldSaveHistory);
       } else if (e.code === "ArrowLeft") {
         e.preventDefault();
-        handleNudge("x", -1);
+        handleNudge("x", -step, shouldSaveHistory);
       } else if (e.code === "ArrowRight") {
         e.preventDefault();
-        handleNudge("x", 1);
+        handleNudge("x", step, shouldSaveHistory);
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [togglePlay, handleNudge, handleUndo, handleRedo]); // Dependencies ensure fresh closures
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    togglePlay,
+    handleNudge,
+    handleUndo,
+    handleRedo,
+    activeCommandId,
+    selectedStrokeIndex,
+    actionClipboard,
+    commandClipboard,
+  ]);
 
   const handleWaitDurationChange = (newDuration: number) => {
     if (!activeCommandId) return;
@@ -3431,6 +2714,7 @@ function App() {
                   paths={canvasPaths}
                   showGrid={showGrid}
                   showPoints={showPoints}
+                  onPathDragStart={saveToHistory}
                   onPathDrag={handlePathDrag}
                   onPan={(dx, dy) => {
                     if (scrollContainerRef.current) {
@@ -3611,9 +2895,9 @@ function App() {
             onSelectOrientation={setOrientation}
             scale={scale}
             onScaleChange={handleScaleChange}
-            onNudge={(dx, dy) => {
-              if (dx !== 0) handleNudge("x", dx);
-              if (dy !== 0) handleNudge("y", dy);
+            onNudge={(dx, dy, saveHistory = true) => {
+              if (dx !== 0) handleNudge("x", dx, saveHistory);
+              if (dy !== 0) handleNudge("y", dy, saveHistory);
             }}
             onExport={handleExportSelected}
             onBackgroundImageUpload={handleBackgroundImageUpload}
@@ -3658,22 +2942,7 @@ function App() {
               if (selectedStrokeIndex !== null) {
                 const points = getSelectedStrokePoints();
                 if (!points || points.length < 2) return;
-                const currentLen = calculateLength(points);
-                if (currentLen === 0) return;
-
-                const scaleFactor = newLen / currentLen;
-                const start = points[0];
-                const end = points[points.length - 1];
-                const mid = {
-                  x: (start.x + end.x) / 2,
-                  y: (start.y + end.y) / 2,
-                };
-
-                const newPoints = points.map((p) => ({
-                  x: mid.x + (p.x - mid.x) * scaleFactor,
-                  y: mid.y + (p.y - mid.y) * scaleFactor,
-                }));
-                updateSelectedStroke(newPoints);
+                updateSelectedStroke(scaleStrokePoints(points, newLen));
               }
             }}
             onCurve={handleCurve}
@@ -3683,6 +2952,7 @@ function App() {
             startY={currentStartY}
             endX={currentEndX}
             endY={currentEndY}
+            onCoordinateChange={handleCoordinateChange}
             isActionSelected={selectedStrokeIndex !== null}
             waitDuration={
               selectedCommand?.waitDuration !== undefined

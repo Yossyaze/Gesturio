@@ -230,7 +230,7 @@ function parseGestureData(gestureBytes: Uint8Array): ParsedGestureData {
       }
 
       const rawStrokes: RawStroke[] = [];
-      let currentGroupTouches = new Map<string, Point[]>();
+      const currentGroupTouches = new Map<string, Point[]>();
       let groupStartTime: number | null = null;
       let groupLastTime: number | null = null;
       let lastGroupEndTime: number | null = null;

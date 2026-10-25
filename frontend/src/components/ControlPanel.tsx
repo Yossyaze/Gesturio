@@ -7,18 +7,11 @@ import React, {
 } from "react";
 import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { type BackgroundImage } from "../api";
+import { type DeviceModel } from "../constants/devices";
 import { useDialog } from "../contexts/DialogContext";
 
-interface DeviceModel {
-  id: string;
-  name: string;
-  width: number;
-  height: number;
-  category: "iPhone" | "iPad";
-}
-
 interface ControlPanelProps {
-  onNudge: (x: number, y: number) => void;
+  onNudge: (x: number, y: number, saveHistory?: boolean) => void;
   onExport: () => void;
   models: DeviceModel[];
   selectedModelId: string;
@@ -49,13 +42,18 @@ interface ControlPanelProps {
   isPlaying: boolean;
   onTogglePlay: () => void;
   angle: number;
-  onAngleChange: (angle: number) => void;
+  onAngleChange: (angle: number, saveHistory?: boolean) => void;
   length: number;
   onLengthChange: (length: number) => void;
   startX?: number;
   startY?: number;
   endX?: number;
   endY?: number;
+  onCoordinateChange?: (
+    pointType: "start" | "end",
+    axis: "x" | "y",
+    value: number,
+  ) => void;
   onCurve: () => void;
   onStraight: () => void;
   isActionSelected?: boolean;
@@ -199,6 +197,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   startY,
   endX,
   endY,
+  onCoordinateChange,
   isActionSelected,
   waitDuration,
   onWaitDurationChange,
@@ -248,16 +247,15 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
 
   const startPress = useCallback(
     (delta: number) => {
-      // Single tap action
+      // 初回押下時はUndo履歴を保存
       let nextAngle = (currentAngleRef.current + delta + 1024) % 1024;
-      onAngleChange(nextAngle);
+      onAngleChange(nextAngle, true);
 
-      // Initial delay for long press
+      // 長押し時の連続リピート（履歴の重複保存を抑制）
       pressTimerRef.current = window.setTimeout(() => {
-        // Repeat interval
         pressIntervalRef.current = window.setInterval(() => {
           nextAngle = (currentAngleRef.current + delta + 1024) % 1024;
-          onAngleChange(nextAngle);
+          onAngleChange(nextAngle, false);
         }, 50); // Fast repeat rate (50ms)
       }, 300);
     },
@@ -282,14 +280,13 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
 
   const startNudgePress = useCallback(
     (dx: number, dy: number) => {
-      // Single tap action
-      onNudge(dx, dy);
+      // 初回押下時はUndo履歴を保存
+      onNudge(dx, dy, true);
 
-      // Initial delay for long press
+      // 長押し時の連続リピート（履歴の重複保存を抑制）
       nudgeTimerRef.current = window.setTimeout(() => {
-        // Repeat interval
         nudgeIntervalRef.current = window.setInterval(() => {
-          onNudge(dx, dy);
+          onNudge(dx, dy, false);
         }, 50); // Fast repeat rate (50ms)
       }, 300);
     },
@@ -551,17 +548,13 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                         </button>
                         {/* 削除 */}
                         <button
-                          onClick={() => {
-                            setTimeout(() => {
-                              if (
-                                window.confirm(
-                                  `「${env.name}」を削除しますか？`,
-                                )
-                              ) {
-                                if (onDeleteEnvironment)
-                                  onDeleteEnvironment(env.id);
-                              }
-                            }, 10);
+                          onClick={async () => {
+                            const confirmed = await confirm(
+                              `「${env.name}」を削除しますか？`,
+                            );
+                            if (confirmed && onDeleteEnvironment) {
+                              onDeleteEnvironment(env.id);
+                            }
                           }}
                           className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
                           title="削除"
@@ -967,40 +960,74 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
               <div className="space-y-4">
                 {/* Position and Nudge Controls */}
                 <div className="flex bg-gray-50 p-2 rounded border border-gray-200">
-                  {/* Left: Position Info */}
-                  <div className="flex flex-col justify-center space-y-3 pr-3 border-r border-gray-200 mr-3 min-w-[140px]">
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                  {/* Left: Position Info (直接数値入力対応) */}
+                  <div className="flex flex-col justify-center space-y-2 pr-3 border-r border-gray-200 mr-3 min-w-[145px]">
+                    <div className="grid grid-cols-2 gap-x-2.5 gap-y-2">
                       <div>
-                        <span className="text-[10px] text-gray-400 block uppercase">
-                          開始 X
+                        <span className="text-[10px] text-gray-400 block uppercase mb-0.5">
+                          {isTap ? "タップ X" : "開始 X"}
                         </span>
-                        <span className="font-mono text-gray-700 text-sm">
-                          {startX !== undefined ? formatCoord(startX) : "--"}
-                        </span>
+                        <BufferedNumberInput
+                          minVal={0}
+                          maxVal={3000}
+                          step="1"
+                          value={startX !== undefined ? formatCoord(startX) : 0}
+                          onChange={(val) =>
+                            onCoordinateChange?.("start", "x", val)
+                          }
+                          format={(v) => Math.round(v).toString()}
+                          className="w-full text-xs font-mono text-gray-700 bg-white px-1.5 py-1 rounded border border-gray-200 focus:border-blue-500 outline-none transition-colors"
+                        />
                       </div>
-                      <div>
-                        <span className="text-[10px] text-gray-400 block uppercase">
+                      <div className={isTap ? "opacity-40 pointer-events-none" : ""}>
+                        <span className="text-[10px] text-gray-400 block uppercase mb-0.5">
                           終了 X
                         </span>
-                        <span className="font-mono text-gray-700 text-sm">
-                          {endX !== undefined ? formatCoord(endX) : "--"}
-                        </span>
+                        <BufferedNumberInput
+                          minVal={0}
+                          maxVal={3000}
+                          step="1"
+                          value={endX !== undefined ? formatCoord(endX) : 0}
+                          onChange={(val) =>
+                            onCoordinateChange?.("end", "x", val)
+                          }
+                          format={(v) => Math.round(v).toString()}
+                          disabled={Boolean(isTap)}
+                          className="w-full text-xs font-mono text-gray-700 bg-white px-1.5 py-1 rounded border border-gray-200 focus:border-blue-500 outline-none transition-colors disabled:bg-gray-100"
+                        />
                       </div>
                       <div>
-                        <span className="text-[10px] text-gray-400 block uppercase">
-                          開始 Y
+                        <span className="text-[10px] text-gray-400 block uppercase mb-0.5">
+                          {isTap ? "タップ Y" : "開始 Y"}
                         </span>
-                        <span className="font-mono text-gray-700 text-sm">
-                          {startY !== undefined ? formatCoord(startY) : "--"}
-                        </span>
+                        <BufferedNumberInput
+                          minVal={0}
+                          maxVal={3000}
+                          step="1"
+                          value={startY !== undefined ? formatCoord(startY) : 0}
+                          onChange={(val) =>
+                            onCoordinateChange?.("start", "y", val)
+                          }
+                          format={(v) => Math.round(v).toString()}
+                          className="w-full text-xs font-mono text-gray-700 bg-white px-1.5 py-1 rounded border border-gray-200 focus:border-blue-500 outline-none transition-colors"
+                        />
                       </div>
-                      <div>
-                        <span className="text-[10px] text-gray-400 block uppercase">
+                      <div className={isTap ? "opacity-40 pointer-events-none" : ""}>
+                        <span className="text-[10px] text-gray-400 block uppercase mb-0.5">
                           終了 Y
                         </span>
-                        <span className="font-mono text-gray-700 text-sm">
-                          {endY !== undefined ? formatCoord(endY) : "--"}
-                        </span>
+                        <BufferedNumberInput
+                          minVal={0}
+                          maxVal={3000}
+                          step="1"
+                          value={endY !== undefined ? formatCoord(endY) : 0}
+                          onChange={(val) =>
+                            onCoordinateChange?.("end", "y", val)
+                          }
+                          format={(v) => Math.round(v).toString()}
+                          disabled={Boolean(isTap)}
+                          className="w-full text-xs font-mono text-gray-700 bg-white px-1.5 py-1 rounded border border-gray-200 focus:border-blue-500 outline-none transition-colors disabled:bg-gray-100"
+                        />
                       </div>
                     </div>
                   </div>

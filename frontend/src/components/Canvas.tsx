@@ -21,6 +21,7 @@ interface CanvasProps {
   showGrid?: boolean;
   showPoints?: boolean;
   style?: React.CSSProperties;
+  onPathDragStart?: () => void;
   onPathDrag?: (
     id: string,
     deltaX: number,
@@ -55,6 +56,7 @@ const Canvas: React.FC<CanvasProps> = ({
   showGrid = false,
   showPoints = true,
   style,
+  onPathDragStart,
   onPathDrag,
   onSelectCommand,
   markerPosition = null,
@@ -72,6 +74,12 @@ const Canvas: React.FC<CanvasProps> = ({
     }[]
   >([]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // 背景画像のHTMLImageElementをキャッシュし、再生中やドラッグ中の再生成・チラつきを防止する
+  const bgImageCacheRef = useRef<{
+    src: string;
+    img: HTMLImageElement;
+    status: "loading" | "loaded" | "error";
+  } | null>(null);
   const [dragState, setDragState] = useState<{
     isDragging: boolean;
     targetId: string | null;
@@ -113,57 +121,82 @@ const Canvas: React.FC<CanvasProps> = ({
     ctx.resetTransform(); // clear previous
     ctx.scale(dpr * scale, dpr * scale);
 
+    const drawDefaultBackground = () => {
+      ctx.fillStyle = "#f3f4f6"; // gray-100
+      ctx.fillRect(0, 0, width, height);
+      ctx.strokeStyle = "#9ca3af"; // gray-400
+      ctx.lineWidth = 1;
+      ctx.strokeRect(0, 0, width, height);
+    };
+
     const render = () => {
-      // Clear canvas (using logical coordinates, but we need to clear the whole scaled buffer)
-      // Since we scaled the context, clearing (0,0,width,height) clears the logical area.
-      // But to be safe and clear everything (including potential artifacts if dpr changed),
-      // we can reset transform to clear, or just clear logical area which covers everything.
-      // Let's stick to logical area which maps to full physical area.
       ctx.clearRect(0, 0, width, height);
 
-      // Draw background image if available
+      // 背景画像がある場合はキャッシュを利用して高速・チラつきなしで描画
       if (backgroundImage) {
-        const img = new Image();
+        const cached = bgImageCacheRef.current;
+        if (cached && cached.src === backgroundImage) {
+          if (cached.status === "loaded") {
+            ctx.drawImage(cached.img, 0, 0, width, height);
+            drawGridAndPaths();
+            return;
+          }
+          if (cached.status === "error") {
+            drawDefaultBackground();
+            drawGridAndPaths();
+            return;
+          }
+        }
 
-        // onloadとonerrorのハンドラを先に設定する（キャッシュされた画像でも安全に発火させるため）
+        const img = new Image();
+        const cacheEntry: {
+          src: string;
+          img: HTMLImageElement;
+          status: "loading" | "loaded" | "error";
+        } = {
+          src: backgroundImage,
+          img,
+          status: "loading",
+        };
+        bgImageCacheRef.current = cacheEntry;
+
         img.onload = () => {
-          ctx.drawImage(img, 0, 0, width, height);
-          drawGridAndPaths();
+          cacheEntry.status = "loaded";
+          if (bgImageCacheRef.current === cacheEntry) {
+            ctx.clearRect(0, 0, width, height);
+            ctx.drawImage(img, 0, 0, width, height);
+            drawGridAndPaths();
+          }
         };
 
         img.onerror = () => {
-          // 画像読み込みエラー時はグレー背景を描画してストロークを描画
+          cacheEntry.status = "error";
           console.warn(
-            "Background image failed to load, falling back to default background.",
+            "背景画像の読み込みに失敗したため、デフォルト背景にフォールバックします。",
           );
-          ctx.fillStyle = "#f3f4f6";
-          ctx.fillRect(0, 0, width, height);
-          ctx.strokeStyle = "#9ca3af";
-          ctx.lineWidth = 1;
-          ctx.strokeRect(0, 0, width, height);
-          drawGridAndPaths();
+          if (bgImageCacheRef.current === cacheEntry) {
+            ctx.clearRect(0, 0, width, height);
+            drawDefaultBackground();
+            drawGridAndPaths();
+          }
         };
 
         img.src = backgroundImage;
 
         if (img.complete && img.naturalHeight !== 0) {
-          // すでに完全に読み込まれている場合 (キャッシュヒット等)
-          // onloadが呼ばれない可能性があるため手動で描画
+          cacheEntry.status = "loaded";
           ctx.drawImage(img, 0, 0, width, height);
           drawGridAndPaths();
-          // 再度onloadが呼ばれるのを防ぐ
           img.onload = null;
           img.onerror = null;
+        } else {
+          // ロード完了前も一旦デフォルト背景とパスを描画して空白を防ぐ
+          drawDefaultBackground();
+          drawGridAndPaths();
         }
       } else {
-        ctx.fillStyle = "#f3f4f6"; // gray-100
-        ctx.fillRect(0, 0, width, height);
-
-        // 背景画像がない場合、枠線を描画する
-        ctx.strokeStyle = "#9ca3af"; // gray-400
-        ctx.lineWidth = 1;
-        ctx.strokeRect(0, 0, width, height);
-
+        bgImageCacheRef.current = null;
+        drawDefaultBackground();
         drawGridAndPaths();
       }
     };
@@ -574,6 +607,10 @@ const Canvas: React.FC<CanvasProps> = ({
             Math.pow(pos.y - dragState.startY, 2),
         );
         if (dist > 3) {
+          // パスのドラッグ開始時に一度だけUndo用の履歴保存を発火する
+          if (dragState.dragType !== "pan") {
+            onPathDragStart?.();
+          }
           setDragState((prev) => ({ ...prev, isDragging: true }));
           // Don't move yet, just change state.
         }
