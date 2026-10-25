@@ -2674,36 +2674,44 @@ function App() {
               y: p.y + deltaY,
             }));
           } else if (index === targetStrokeIndex) {
-            // Start/End drags only apply to the specific target stroke even in command mode
-            // (Can't meaningfully drag 5 start points at once with one mouse cursor)
+            // 始点・終点のドラッグは単一ストロークに対してのみ適用
             if (type === "start") {
-              const newStart = {
-                x: newPoints[0].x + deltaX,
-                y: newPoints[0].y + deltaY,
-              };
-              const end = newPoints[newPoints.length - 1];
-
-              if (newPoints.length) {
-                const currentPointsCount = stroke.length;
-                const currentDuration = Math.max(
-                  0.40,
-                  (currentPointsCount - 1) / 60,
-                );
-                newPoints = resamplePath([newStart, end], currentDuration);
+              const count = newPoints.length;
+              if (count >= 2) {
+                // 始点から終点に向けて線形に変位を減衰させて適用（ポイント数・所要時間を完全に保持）
+                newPoints = newPoints.map((p, i) => {
+                  const factor = 1 - i / (count - 1);
+                  return {
+                    x: p.x + deltaX * factor,
+                    y: p.y + deltaY * factor,
+                  };
+                });
+              } else if (count === 1) {
+                newPoints = [
+                  {
+                    x: newPoints[0].x + deltaX,
+                    y: newPoints[0].y + deltaY,
+                  },
+                ];
               }
             } else if (type === "end") {
-              const start = newPoints[0];
-              const newEnd = {
-                x: newPoints[newPoints.length - 1].x + deltaX,
-                y: newPoints[newPoints.length - 1].y + deltaY,
-              };
-              if (newPoints.length) {
-                const currentPointsCount = newPoints.length;
-                const currentDuration = Math.max(
-                  0.40,
-                  (currentPointsCount - 1) / 60,
-                );
-                newPoints = resamplePath([start, newEnd], currentDuration);
+              const count = newPoints.length;
+              if (count >= 2) {
+                // 終点側に向けて線形に変位を適用（ポイント数・所要時間を完全に保持）
+                newPoints = newPoints.map((p, i) => {
+                  const factor = i / (count - 1);
+                  return {
+                    x: p.x + deltaX * factor,
+                    y: p.y + deltaY * factor,
+                  };
+                });
+              } else if (count === 1) {
+                newPoints = [
+                  {
+                    x: newPoints[0].x + deltaX,
+                    y: newPoints[0].y + deltaY,
+                  },
+                ];
               }
             }
           }
