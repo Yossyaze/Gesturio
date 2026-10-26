@@ -959,12 +959,12 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
 
               <div className="space-y-4">
                 {/* Position and Nudge Controls */}
-                <div className="flex bg-gray-50 p-2 rounded border border-gray-200">
+                <div className="flex items-center bg-gray-50 p-2 rounded border border-gray-200">
                   {/* Left: Position Info (直接数値入力対応) */}
-                  <div className="flex flex-col justify-center space-y-2 pr-3 border-r border-gray-200 mr-3 min-w-[145px]">
-                    <div className="grid grid-cols-2 gap-x-2.5 gap-y-2">
-                      <div>
-                        <span className="text-[10px] text-gray-400 block uppercase mb-0.5">
+                  <div className="flex flex-col justify-center space-y-2 pr-3 border-r border-gray-200 mr-3 w-[140px] shrink-0">
+                    <div className="grid grid-cols-2 gap-x-2 gap-y-2">
+                      <div className="min-w-0">
+                        <span className="text-[10px] text-gray-400 block uppercase mb-0.5 truncate">
                           {isTap ? "タップ X" : "開始 X"}
                         </span>
                         <BufferedNumberInput
@@ -976,11 +976,11 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                             onCoordinateChange?.("start", "x", val)
                           }
                           format={(v) => Math.round(v).toString()}
-                          className="w-full text-xs font-mono text-gray-700 bg-white px-1.5 py-1 rounded border border-gray-200 focus:border-blue-500 outline-none transition-colors"
+                          className="w-14 text-xs font-mono text-gray-700 bg-white px-1.5 py-0.5 rounded border border-gray-200 focus:border-blue-500 outline-none transition-colors"
                         />
                       </div>
-                      <div className={isTap ? "opacity-40 pointer-events-none" : ""}>
-                        <span className="text-[10px] text-gray-400 block uppercase mb-0.5">
+                      <div className={`min-w-0 ${isTap ? "opacity-40 pointer-events-none" : ""}`}>
+                        <span className="text-[10px] text-gray-400 block uppercase mb-0.5 truncate">
                           終了 X
                         </span>
                         <BufferedNumberInput
@@ -993,11 +993,11 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                           }
                           format={(v) => Math.round(v).toString()}
                           disabled={Boolean(isTap)}
-                          className="w-full text-xs font-mono text-gray-700 bg-white px-1.5 py-1 rounded border border-gray-200 focus:border-blue-500 outline-none transition-colors disabled:bg-gray-100"
+                          className="w-14 text-xs font-mono text-gray-700 bg-white px-1.5 py-0.5 rounded border border-gray-200 focus:border-blue-500 outline-none transition-colors disabled:bg-gray-100"
                         />
                       </div>
-                      <div>
-                        <span className="text-[10px] text-gray-400 block uppercase mb-0.5">
+                      <div className="min-w-0">
+                        <span className="text-[10px] text-gray-400 block uppercase mb-0.5 truncate">
                           {isTap ? "タップ Y" : "開始 Y"}
                         </span>
                         <BufferedNumberInput
@@ -1009,11 +1009,11 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                             onCoordinateChange?.("start", "y", val)
                           }
                           format={(v) => Math.round(v).toString()}
-                          className="w-full text-xs font-mono text-gray-700 bg-white px-1.5 py-1 rounded border border-gray-200 focus:border-blue-500 outline-none transition-colors"
+                          className="w-14 text-xs font-mono text-gray-700 bg-white px-1.5 py-0.5 rounded border border-gray-200 focus:border-blue-500 outline-none transition-colors"
                         />
                       </div>
-                      <div className={isTap ? "opacity-40 pointer-events-none" : ""}>
-                        <span className="text-[10px] text-gray-400 block uppercase mb-0.5">
+                      <div className={`min-w-0 ${isTap ? "opacity-40 pointer-events-none" : ""}`}>
+                        <span className="text-[10px] text-gray-400 block uppercase mb-0.5 truncate">
                           終了 Y
                         </span>
                         <BufferedNumberInput
@@ -1026,14 +1026,14 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                           }
                           format={(v) => Math.round(v).toString()}
                           disabled={Boolean(isTap)}
-                          className="w-full text-xs font-mono text-gray-700 bg-white px-1.5 py-1 rounded border border-gray-200 focus:border-blue-500 outline-none transition-colors disabled:bg-gray-100"
+                          className="w-14 text-xs font-mono text-gray-700 bg-white px-1.5 py-0.5 rounded border border-gray-200 focus:border-blue-500 outline-none transition-colors disabled:bg-gray-100"
                         />
                       </div>
                     </div>
                   </div>
 
                   {/* Right: Nudge Controls */}
-                  <div className="flex-1 flex flex-col items-center justify-center">
+                  <div className="flex-1 shrink-0 flex flex-col items-center justify-center">
                     <span className="text-[10px] text-gray-500 mb-1">
                       位置の微調整
                     </span>
