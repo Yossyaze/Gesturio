@@ -46,6 +46,11 @@ interface CanvasProps {
     isSelected?: boolean;
   }[];
   onSelectWait?: (strokeIndex: number) => void;
+  onQuickAddAction?: (
+    action:
+      | { type: "tap"; point: Point }
+      | { type: "line"; start: Point; end: Point },
+  ) => void;
 }
 
 const Canvas: React.FC<CanvasProps> = ({
@@ -65,6 +70,7 @@ const Canvas: React.FC<CanvasProps> = ({
   connections = [],
   onSelectWait,
   onPan,
+  onQuickAddAction,
 }) => {
   // Badges hit regions for click handling
   const badgesRef = useRef<
@@ -83,7 +89,7 @@ const Canvas: React.FC<CanvasProps> = ({
   const [dragState, setDragState] = useState<{
     isDragging: boolean;
     targetId: string | null;
-    dragType: "move" | "start" | "end" | "pan" | null;
+    dragType: "move" | "start" | "end" | "pan" | "quickAdd" | null;
     lastX: number; // Logical X For Path Drag
     lastY: number; // Logical Y For Path Drag
     lastClientX: number; // Physical X for Pan
@@ -101,6 +107,10 @@ const Canvas: React.FC<CanvasProps> = ({
     startX: 0,
     startY: 0,
   });
+  const [quickAddPreview, setQuickAddPreview] = useState<{
+    start: Point;
+    end: Point;
+  } | null>(null);
   const [cursor, setCursor] = useState<string>("default");
 
   useEffect(() => {
@@ -411,18 +421,70 @@ const Canvas: React.FC<CanvasProps> = ({
           const midX = (conn.from.x + conn.to.x) / 2;
           const midY = (conn.from.y + conn.to.y) / 2;
 
-          // 秒数の表示は削除し、中点付近のクリック判定(hit region)のみ残す
-          const hitSize = 30;
+          // 待機時間のピル型バッジを描画（クリック可能であることが分かる見た目にする）
+          const waitLabel = `${conn.duration.toFixed(2)}s`;
+          ctx.font = "600 10px ui-monospace, SFMono-Regular, Menlo, monospace";
+          const textWidth = ctx.measureText(waitLabel).width;
+          const pillW = Math.max(36, textWidth + 12);
+          const pillH = 18;
+          const pillX = midX - pillW / 2;
+          const pillY = midY - pillH / 2;
+          const pillR = pillH / 2;
+
+          ctx.beginPath();
+          ctx.roundRect(pillX, pillY, pillW, pillH, pillR);
+          ctx.fillStyle = conn.isSelected
+            ? "#10B981"
+            : "rgba(255, 255, 255, 0.92)";
+          ctx.fill();
+          ctx.strokeStyle = conn.isSelected ? "#059669" : "#cbd5e1";
+          ctx.lineWidth = conn.isSelected ? 1.5 : 1;
+          ctx.stroke();
+
+          ctx.fillStyle = conn.isSelected ? "#ffffff" : "#475569";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(waitLabel, midX, midY + 0.5);
+
           badgesRef.current.push({
             rect: {
-              x: midX - hitSize / 2,
-              y: midY - hitSize / 2,
-              w: hitSize,
-              h: hitSize,
+              x: pillX - 4,
+              y: pillY - 4,
+              w: pillW + 8,
+              h: pillH + 8,
             },
             strokeIndex: conn.strokeIndex,
           });
         });
+      }
+
+      // Shift + ドラッグによる新規スワイプ線のプレビュー描画
+      if (quickAddPreview) {
+        const { start, end } = quickAddPreview;
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.strokeStyle = "#2563eb";
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([6, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.beginPath();
+        ctx.arc(start.x, start.y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = "#10B981";
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(end.x, end.y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = "#EF4444";
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
       }
     };
 
@@ -437,6 +499,7 @@ const Canvas: React.FC<CanvasProps> = ({
     markerPosition,
     markerPositions,
     connections,
+    quickAddPreview,
     scale, // Added scale to dependencies
   ]);
 
@@ -537,8 +600,32 @@ const Canvas: React.FC<CanvasProps> = ({
     e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>,
   ) => {
     if ("touches" in e && e.touches.length !== 1) return;
-    if (!onPathDrag && !onPan) return;
     const pos = getLogicalPosition(e);
+
+    // Shift + マウス押下で直接アクション追加モードを開始
+    if ("shiftKey" in e && e.shiftKey && onQuickAddAction) {
+      e.preventDefault();
+      const clampedX = Math.max(0, Math.min(width, pos.x));
+      const clampedY = Math.max(0, Math.min(height, pos.y));
+      setQuickAddPreview({
+        start: { x: clampedX, y: clampedY },
+        end: { x: clampedX, y: clampedY },
+      });
+      setDragState({
+        isDragging: false,
+        targetId: null,
+        dragType: "quickAdd",
+        lastX: clampedX,
+        lastY: clampedY,
+        lastClientX: pos.clientX,
+        lastClientY: pos.clientY,
+        startX: clampedX,
+        startY: clampedY,
+      });
+      return;
+    }
+
+    if (!onPathDrag && !onPan) return;
 
     // Check selected path first
     const selectedPath = paths.find((p) => p.isSelected);
@@ -600,6 +687,31 @@ const Canvas: React.FC<CanvasProps> = ({
     const pos = getLogicalPosition(e);
 
     if (dragState.dragType) {
+      if (dragState.dragType === "quickAdd") {
+        const clampedX = Math.max(0, Math.min(width, pos.x));
+        const clampedY = Math.max(0, Math.min(height, pos.y));
+        const dist = Math.hypot(
+          clampedX - dragState.startX,
+          clampedY - dragState.startY,
+        );
+        const isLineDrag = dragState.isDragging || dist >= 5;
+        if (isLineDrag) {
+          setQuickAddPreview({
+            start: { x: dragState.startX, y: dragState.startY },
+            end: { x: clampedX, y: clampedY },
+          });
+        }
+        setDragState((prev) => ({
+          ...prev,
+          isDragging: isLineDrag,
+          lastX: clampedX,
+          lastY: clampedY,
+          lastClientX: pos.clientX,
+          lastClientY: pos.clientY,
+        }));
+        return;
+      }
+
       // Check if we should start dragging
       if (!dragState.isDragging) {
         const dist = Math.sqrt(
@@ -644,7 +756,21 @@ const Canvas: React.FC<CanvasProps> = ({
       return;
     }
 
-    // Update cursor based on hover
+    // Update cursor based on hover (待機時間バッジの判定を優先)
+    const isHoveringBadge =
+      onSelectWait &&
+      badgesRef.current.some(
+        (badge) =>
+          pos.x >= badge.rect.x &&
+          pos.x <= badge.rect.x + badge.rect.w &&
+          pos.y >= badge.rect.y &&
+          pos.y <= badge.rect.y + badge.rect.h,
+      );
+    if (isHoveringBadge) {
+      setCursor("pointer");
+      return;
+    }
+
     const selectedPath = paths.find((p) => p.isSelected);
     if (selectedPath) {
       const isTap = isTapStroke(selectedPath.points);
@@ -678,10 +804,8 @@ const Canvas: React.FC<CanvasProps> = ({
 
   const wasDraggingRef = useRef<boolean>(false);
 
-  const handleMouseUp = () => {
-    // Capture drag state before reset to block click
-    wasDraggingRef.current = dragState.isDragging;
-
+  const resetDragState = () => {
+    setQuickAddPreview(null);
     setDragState({
       isDragging: false,
       targetId: null,
@@ -693,6 +817,39 @@ const Canvas: React.FC<CanvasProps> = ({
       startX: 0,
       startY: 0,
     });
+  };
+
+  const handleMouseUp = () => {
+    if (dragState.dragType === "quickAdd" && onQuickAddAction) {
+      const dist = Math.hypot(
+        dragState.lastX - dragState.startX,
+        dragState.lastY - dragState.startY,
+      );
+      if (dist >= 5) {
+        onQuickAddAction({
+          type: "line",
+          start: { x: dragState.startX, y: dragState.startY },
+          end: { x: dragState.lastX, y: dragState.lastY },
+        });
+      } else {
+        onQuickAddAction({
+          type: "tap",
+          point: { x: dragState.startX, y: dragState.startY },
+        });
+      }
+      wasDraggingRef.current = true;
+      resetDragState();
+      return;
+    }
+
+    // Capture drag state before reset to block click
+    wasDraggingRef.current = dragState.isDragging;
+    resetDragState();
+  };
+
+  const handleMouseCancel = () => {
+    wasDraggingRef.current = dragState.isDragging;
+    resetDragState();
   };
 
   const handleCanvasClick = (
@@ -797,25 +954,31 @@ const Canvas: React.FC<CanvasProps> = ({
     onMouseDown: handleMouseDown,
     onMouseMove: handleMouseMove,
     onMouseUp: handleMouseUp,
-    onMouseLeave: handleMouseUp,
+    onMouseLeave: handleMouseCancel,
     onClick: handleCanvasClick,
     onTouchStart: handleMouseDown,
     onTouchMove: handleMouseMove,
     onTouchEnd: handleMouseUp,
-    onTouchCancel: handleMouseUp,
+    onTouchCancel: handleMouseCancel,
   };
 
   return (
     <div
       {...handlers}
       className={`touch-none ${
-        dragState.dragType === "pan"
-          ? "cursor-grabbing"
+        dragState.dragType === "quickAdd"
+          ? "cursor-crosshair"
           : dragState.dragType
             ? "cursor-grabbing"
-            : cursor === "default" && onPan
-              ? "cursor-grab"
-              : `cursor-${cursor}`
+            : cursor === "pointer"
+              ? "cursor-pointer"
+              : cursor === "crosshair"
+                ? "cursor-crosshair"
+                : cursor === "move"
+                  ? "cursor-move"
+                  : onPan
+                    ? "cursor-grab"
+                    : "cursor-default"
       } relative bg-gray-50 shadow-inner`}
       style={{
         ...style,

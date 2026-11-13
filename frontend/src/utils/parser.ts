@@ -219,7 +219,7 @@ function parseGestureData(gestureBytes: Uint8Array): ParsedGestureData {
         }
       }
 
-      const pointPattern = /\{([\d.]+),\s*([\d.]+)\}/;
+      const pointPattern = /\{([-+]?[\d.]+),\s*([-+]?[\d.]+)\}/;
 
       // 1. 各グループ（同時タッチを含むストローク群）を順次抽出
       interface RawStroke {
@@ -227,6 +227,7 @@ function parseGestureData(gestureBytes: Uint8Array): ParsedGestureData {
         startTime: number;
         endTime: number;
         groupId?: string;
+        waitAfter?: number;
       }
 
       const rawStrokes: RawStroke[] = [];
@@ -234,7 +235,6 @@ function parseGestureData(gestureBytes: Uint8Array): ParsedGestureData {
       let groupStartTime: number | null = null;
       let groupLastTime: number | null = null;
       let lastGroupEndTime: number | null = null;
-      const groupWaits: number[] = [];
 
       const flushGroup = (touchUpTime?: number) => {
         if (currentGroupTouches.size === 0) return;
@@ -277,8 +277,12 @@ function parseGestureData(gestureBytes: Uint8Array): ParsedGestureData {
         }
 
         if (groupStartTime === null) {
-          if (lastGroupEndTime !== null) {
-            groupWaits.push(Math.max(0.01, timeVal - lastGroupEndTime));
+          if (lastGroupEndTime !== null && rawStrokes.length > 0) {
+            // 直前グループの最終ストロークに次のグループまでの待機時間を紐づける
+            const waitSec = Math.max(0.01, timeVal - lastGroupEndTime);
+            rawStrokes[rawStrokes.length - 1].waitAfter = parseFloat(
+              waitSec.toFixed(2),
+            );
           }
           groupStartTime = timeVal;
         }
@@ -358,11 +362,7 @@ function parseGestureData(gestureBytes: Uint8Array): ParsedGestureData {
         }
 
         const waitAfter =
-          i < rawStrokes.length - 1
-            ? groupWaits[i] !== undefined
-              ? parseFloat(groupWaits[i].toFixed(2))
-              : 0.1
-            : undefined;
+          i < rawStrokes.length - 1 ? s.waitAfter : undefined;
 
         if (waitAfter !== undefined) {
           totalWait += waitAfter;
@@ -969,7 +969,10 @@ export function createGestureData(
     const groupTouchIds = group.strokes.map((_, i) => touchId + i);
     touchId += group.strokes.length; // 次のグループ用
 
-    const maxPoints = Math.max(...group.strokes.map(s => s.length));
+    const maxPoints = Math.max(...group.strokes.map((s) => s.length));
+    if (maxPoints <= 0) continue;
+
+    const groupStartTime = currentTime;
 
     // ストローク内の各フレーム(ポイント)を記録
     for (let frameIndex = 0; frameIndex < maxPoints; frameIndex++) {
@@ -1017,15 +1020,13 @@ export function createGestureData(
       }
 
       if (effectiveTapDuration > 0) {
-        const remainingTapWait = Math.max(0, effectiveTapDuration - frameDuration);
-        if (remainingTapWait > 0) {
-          currentTime += remainingTapWait;
-        }
+        // 開始時刻からの経過時間をそのまま持続時間に設定し、Touch Up と一致させる
+        currentTime = groupStartTime + effectiveTapDuration;
       }
     }
 
     // --- グループ終了時の「Touch Up」イベントを追加 ---
-    const liftTime = currentTime - frameDuration;
+    const liftTime = currentTime;
     const emptyDictUid = archiver.archiveMutableDict([], []);
     const liftTimeUid = archiver.addObject(new BplistReal(liftTime));
     const liftEventUid = archiver.archiveDict(

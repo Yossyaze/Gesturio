@@ -14,6 +14,73 @@ export interface PlaybackProgress {
   percent: number;
 }
 
+export interface PlaybackTimelineBlock {
+  startTime: number;
+  duration: number;
+  items: {
+    strokeIndex: number;
+    duration: number;
+  }[];
+}
+
+/**
+ * グループ化（同時実行）と個別待機時間を考慮してコマンドの再生タイムラインと合計所要時間を構築する。
+ */
+export function buildPlaybackTimeline(command: Command): {
+  timeline: PlaybackTimelineBlock[];
+  totalDuration: number;
+} {
+  const timeline: PlaybackTimelineBlock[] = [];
+  let currentTime = 0;
+  const waitTime =
+    command.waitDuration !== undefined ? command.waitDuration : 0.1;
+
+  for (let i = 0; i < command.strokes.length; i++) {
+    const metadata = command.strokeMetadata?.[i];
+    const currentGroupId = metadata?.groupId;
+
+    const s = command.strokes[i];
+    const strokeTapDuration =
+      metadata?.tapDuration !== undefined
+        ? metadata.tapDuration
+        : command.tapDuration || 0.05;
+
+    const strokeDuration = isTapStroke(s)
+      ? strokeTapDuration
+      : Math.max(0.1, (s.length - 1) / 60);
+
+    if (
+      currentGroupId &&
+      i > 0 &&
+      command.strokeMetadata?.[i - 1]?.groupId === currentGroupId
+    ) {
+      // 直前のストロークと同じグループ（同時実行）
+      const lastBlock = timeline[timeline.length - 1];
+      lastBlock.items.push({ strokeIndex: i, duration: strokeDuration });
+      lastBlock.duration = Math.max(lastBlock.duration, strokeDuration);
+    } else {
+      // 新しいグループまたは順次アクション（前のブロックからの待機時間を加算）
+      if (i > 0) {
+        const prevWait = command.strokeMetadata?.[i - 1]?.waitAfter;
+        currentTime += prevWait !== undefined ? prevWait : waitTime;
+      }
+
+      timeline.push({
+        startTime: currentTime,
+        duration: strokeDuration,
+        items: [{ strokeIndex: i, duration: strokeDuration }],
+      });
+    }
+
+    const nextGroupId = command.strokeMetadata?.[i + 1]?.groupId;
+    if (!currentGroupId || currentGroupId !== nextGroupId) {
+      currentTime += timeline[timeline.length - 1].duration;
+    }
+  }
+
+  return { timeline, totalDuration: currentTime };
+}
+
 export function usePlayback(selectedCommand: Command | undefined) {
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [playbackProgress, setPlaybackProgress] =
@@ -25,66 +92,9 @@ export function usePlayback(selectedCommand: Command | undefined) {
 
   useEffect(() => {
     if (isPlaying && selectedCommand) {
-      // groupId に基づいて同時実行ブロックのタイムラインを構築
-      const timeline: {
-        startTime: number;
-        duration: number;
-        items: {
-          strokeIndex: number;
-          duration: number;
-        }[];
-      }[] = [];
-
-      let currentTime = 0;
-      const waitTime =
-        selectedCommand.waitDuration !== undefined
-          ? selectedCommand.waitDuration
-          : 0.1;
-
-      for (let i = 0; i < selectedCommand.strokes.length; i++) {
-        const metadata = selectedCommand.strokeMetadata?.[i];
-        const currentGroupId = metadata?.groupId;
-
-        const s = selectedCommand.strokes[i];
-        const strokeTapDuration =
-          metadata?.tapDuration !== undefined
-            ? metadata.tapDuration
-            : selectedCommand.tapDuration || 0.05;
-
-        const strokeDuration = isTapStroke(s)
-          ? strokeTapDuration
-          : Math.max(0.1, (s.length - 1) / 60);
-
-        if (
-          currentGroupId &&
-          i > 0 &&
-          selectedCommand.strokeMetadata?.[i - 1]?.groupId === currentGroupId
-        ) {
-          // 直前のストロークと同じグループ（同時実行）
-          const lastBlock = timeline[timeline.length - 1];
-          lastBlock.items.push({ strokeIndex: i, duration: strokeDuration });
-          lastBlock.duration = Math.max(lastBlock.duration, strokeDuration);
-        } else {
-          // 新しいグループまたは順次アクション（前のブロックからの待機時間を加算）
-          if (i > 0) {
-            const prevWait = selectedCommand.strokeMetadata?.[i - 1]?.waitAfter;
-            currentTime += prevWait !== undefined ? prevWait : waitTime;
-          }
-
-          timeline.push({
-            startTime: currentTime,
-            duration: strokeDuration,
-            items: [{ strokeIndex: i, duration: strokeDuration }],
-          });
-        }
-
-        const nextGroupId = selectedCommand.strokeMetadata?.[i + 1]?.groupId;
-        if (!currentGroupId || currentGroupId !== nextGroupId) {
-          currentTime += timeline[timeline.length - 1].duration;
-        }
-      }
-
-      const totalDuration = Math.max(0.1, currentTime);
+      const { timeline, totalDuration: rawDuration } =
+        buildPlaybackTimeline(selectedCommand);
+      const totalDuration = Math.max(0.1, rawDuration);
 
       const animate = (time: number) => {
         if (startTimeRef.current === null) {

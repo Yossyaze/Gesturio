@@ -150,10 +150,15 @@ export function scaleStrokePoints(points: Point[], newLen: number): Point[] {
 }
 
 /**
- * 始点と終点を維持したまま、ランダムな二次ベジェ曲線カーブを適用する。
+ * 始点と終点を維持したまま、二次ベジェ曲線カーブを適用する。
+ * bendRatio を省略した場合はランダムな向き・30%の強さで曲げる。
  */
-export function curveStrokePoints(stroke: Point[]): Point[] {
+export function curveStrokePoints(stroke: Point[], bendRatio?: number): Point[] {
   if (stroke.length < 2) return stroke;
+
+  if (bendRatio !== undefined && Math.abs(bendRatio) < 0.005) {
+    return straightenStrokePoints(stroke);
+  }
 
   const start = stroke[0];
   const end = stroke[stroke.length - 1];
@@ -165,17 +170,22 @@ export function curveStrokePoints(stroke: Point[]): Point[] {
 
   if (dist < 1) return stroke;
 
-  // 長さの約30%分、法線方向のランダムな向きに制御点をオフセット
-  const offset = dist * 0.3;
-  const angle = Math.atan2(dy, dx);
-  const perpAngle =
-    angle + (Math.random() > 0.5 ? Math.PI / 2 : -Math.PI / 2);
+  // 法線ベクトル (-dy/dist, dx/dist)
+  const nx = -dy / dist;
+  const ny = dx / dist;
+  const ratio =
+    bendRatio !== undefined
+      ? Math.max(-0.8, Math.min(0.8, bendRatio))
+      : Math.random() > 0.5
+        ? 0.3
+        : -0.3;
 
+  const offset = dist * ratio;
   const midX = (start.x + end.x) / 2;
   const midY = (start.y + end.y) / 2;
 
-  const controlX = midX + Math.cos(perpAngle) * offset;
-  const controlY = midY + Math.sin(perpAngle) * offset;
+  const controlX = midX + nx * offset;
+  const controlY = midY + ny * offset;
 
   const newPoints: Point[] = [];
   for (let i = 0; i < pointCount; i++) {
@@ -191,6 +201,38 @@ export function curveStrokePoints(stroke: Point[]): Point[] {
     newPoints.push({ x, y });
   }
   return newPoints;
+}
+
+/**
+ * 始点と終点を結ぶ直線に対する現在のストロークの曲がり具合（bendRatio: -0.6 〜 +0.6）を推定する。
+ */
+export function calculateCurveRatio(stroke: Point[]): number {
+  if (stroke.length < 3) return 0;
+
+  const start = stroke[0];
+  const end = stroke[stroke.length - 1];
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  if (dist < 1) return 0;
+
+  const nx = -dy / dist;
+  const ny = dx / dist;
+
+  let maxSignedDist = 0;
+  for (let i = 1; i < stroke.length - 1; i++) {
+    const p = stroke[i];
+    const signedDist = (p.x - start.x) * nx + (p.y - start.y) * ny;
+    if (Math.abs(signedDist) > Math.abs(maxSignedDist)) {
+      maxSignedDist = signedDist;
+    }
+  }
+
+  // 二次ベジェ曲線の中点変位は制御点オフセットの 0.5 倍になるため、2倍して制御点比率へ戻す
+  const ratio = (2 * maxSignedDist) / dist;
+  const clamped = Math.max(-0.6, Math.min(0.6, ratio));
+  if (Math.abs(clamped) < 0.01) return 0;
+  return Math.round(clamped * 100) / 100;
 }
 
 /**
@@ -215,31 +257,67 @@ export function straightenStrokePoints(stroke: Point[]): Point[] {
 }
 
 /**
- * バウンディングボックスの中心を基準に、ストロークを水平または垂直に反転させる。
+ * バウンディングボックスの中心（または指定された中心座標）を基準に、ストロークを水平または垂直に反転させる。
  */
 export function flipStrokePoints(
   stroke: Point[],
   direction: "horizontal" | "vertical",
+  customCenter?: Point,
 ): Point[] {
   if (stroke.length === 0) return stroke;
 
-  let minX = Infinity,
-    maxX = -Infinity,
-    minY = Infinity,
-    maxY = -Infinity;
-  for (const p of stroke) {
-    if (p.x < minX) minX = p.x;
-    if (p.x > maxX) maxX = p.x;
-    if (p.y < minY) minY = p.y;
-    if (p.y > maxY) maxY = p.y;
+  let centerX: number;
+  let centerY: number;
+
+  if (customCenter) {
+    centerX = customCenter.x;
+    centerY = customCenter.y;
+  } else {
+    let minX = Infinity,
+      maxX = -Infinity,
+      minY = Infinity,
+      maxY = -Infinity;
+    for (const p of stroke) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+    centerX = (minX + maxX) / 2;
+    centerY = (minY + maxY) / 2;
   }
-  const centerX = (minX + maxX) / 2;
-  const centerY = (minY + maxY) / 2;
 
   return stroke.map((p) => ({
     x: direction === "horizontal" ? centerX - (p.x - centerX) : p.x,
     y: direction === "vertical" ? centerY - (p.y - centerY) : p.y,
   }));
+}
+
+/**
+ * 複数ストローク全体のバウンディングボックス中心を算出する。
+ */
+export function getStrokesBoundingCenter(strokes: Point[][]): Point | undefined {
+  let minX = Infinity,
+    maxX = -Infinity,
+    minY = Infinity,
+    maxY = -Infinity;
+  let hasPoint = false;
+
+  for (const stroke of strokes) {
+    for (const p of stroke) {
+      hasPoint = true;
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+  }
+
+  if (!hasPoint) return undefined;
+  return {
+    x: (minX + maxX) / 2,
+    y: (minY + maxY) / 2,
+  };
 }
 
 /**

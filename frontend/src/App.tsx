@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { arrayMove } from "@dnd-kit/sortable";
-import { Play, Square, Maximize, Minimize } from "lucide-react";
+import { Play, Square, Maximize, Minimize, HelpCircle } from "lucide-react";
 import Canvas from "./components/Canvas";
 import DeviceFrame from "./components/DeviceFrame";
 import CanvasHUD from "./components/CanvasHUD";
@@ -8,6 +8,7 @@ import ControlPanel from "./components/ControlPanel";
 import Sidebar from "./components/Sidebar";
 import ProjectMenu from "./components/ProjectMenu";
 import AuthStatus from "./components/AuthStatus";
+import ShortcutHelpModal from "./components/ShortcutHelpModal";
 import { useAuth } from "./contexts/AuthContext";
 import { useDialog } from "./contexts/DialogContext";
 import {
@@ -38,12 +39,14 @@ import {
   rotateStrokePoints,
   scaleStrokePoints,
   curveStrokePoints,
+  calculateCurveRatio,
   straightenStrokePoints,
   flipStrokePoints,
   flipStrokeAnglePoints,
   displaceStrokePoints,
+  getStrokesBoundingCenter,
 } from "./utils/geometry";
-import { usePlayback } from "./hooks/usePlayback";
+import { buildPlaybackTimeline, usePlayback } from "./hooks/usePlayback";
 
 interface ActionClipboard {
   stroke: Point[];
@@ -76,7 +79,8 @@ function saveState<T>(key: string, value: T): void {
 }
 
 function App() {
-  const { confirm, prompt, alert, confirmUnsaved } = useDialog();
+  const { confirm, prompt, alert, confirmUnsaved, toast } = useDialog();
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
 
   // --- 永続化される状態 (localStorage から復元) ---
   const [commands, setCommands] = useState<Command[]>(() =>
@@ -147,7 +151,7 @@ function App() {
         setCurrentProjectName(data.name);
         setProjectsList((prev) => [...prev, { id: data.id!, name: data.name }]);
         setSavedCommandsJSON(JSON.stringify(data.commands));
-        await alert("プロジェクトを作成しました");
+        toast("プロジェクトを作成しました");
         return true;
       }
       return false;
@@ -176,6 +180,17 @@ function App() {
         settings: buildProjectSettings(),
       });
       setSavedCommandsJSON(JSON.stringify(commands));
+      // ログイン状態の切り替え等で一覧に未登録だった場合もプロジェクト一覧に同期する
+      setProjectsList((prev) => {
+        const exists = prev.some((p) => p.id === currentProjectId);
+        if (exists) {
+          return prev.map((p) =>
+            p.id === currentProjectId ? { ...p, name: currentProjectName } : p,
+          );
+        }
+        return [{ id: currentProjectId, name: currentProjectName }, ...prev];
+      });
+      toast("プロジェクトを保存しました");
       return true;
     } catch (err) {
       console.error(err);
@@ -246,10 +261,17 @@ function App() {
             }
           }
         }
-        // 読み込んだコマンドの先頭を選択
+        // 読み込んだコマンドの先頭および先頭ストロークを選択し、複数選択状態をクリア
+        setCheckedCommandIds(new Set());
         setActiveCommandId(
           data.commands.length > 0 ? data.commands[0].id : null,
         );
+        setSelectedStrokeIndex(
+          data.commands.length > 0 && data.commands[0].strokes.length > 0
+            ? 0
+            : null,
+        );
+        setSelectionType("stroke");
         // 履歴をリセット
         setPastLevels([]);
         setFutureLevels([]);
@@ -321,8 +343,10 @@ function App() {
     setCurrentProjectId(null);
     setCurrentProjectName("名称未設定プロジェクト");
     setCommands([]);
+    setCheckedCommandIds(new Set());
     setActiveCommandId(null);
     setSelectedStrokeIndex(null);
+    setSelectionType("stroke");
     setPastLevels([]);
     setFutureLevels([]);
     setSavedCommandsJSON(JSON.stringify([]));
@@ -349,6 +373,20 @@ function App() {
     null,
   );
 
+  // stale closure 対策用 Ref（Sidebar のメモ化コールバック等から最新値を参照するため）
+  const activeCommandIdRef = useRef<string | null>(activeCommandId);
+  const selectedStrokeIndexRef = useRef<number | null>(selectedStrokeIndex);
+  const actionClipboardRef = useRef<ActionClipboard | null>(actionClipboard);
+  useEffect(() => {
+    activeCommandIdRef.current = activeCommandId;
+  }, [activeCommandId]);
+  useEffect(() => {
+    selectedStrokeIndexRef.current = selectedStrokeIndex;
+  }, [selectedStrokeIndex]);
+  useEffect(() => {
+    actionClipboardRef.current = actionClipboard;
+  }, [actionClipboard]);
+
   useEffect(() => {
     setCheckedStrokeIndices(new Set());
   }, [activeCommandId]);
@@ -367,19 +405,42 @@ function App() {
     setFutureLevels([]);
   }, []);
 
+  const syncSelectionAfterHistoryChange = (targetCommands: Command[]) => {
+    const validIds = new Set(targetCommands.map((c) => c.id));
+    setCheckedCommandIds((prev) => {
+      const next = new Set([...prev].filter((id) => validIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+
+    const currentActive = targetCommands.find((c) => c.id === activeCommandId);
+    if (activeCommandId && !currentActive) {
+      setActiveCommandId(
+        targetCommands.length > 0 ? targetCommands[0].id : null,
+      );
+      setSelectedStrokeIndex(null);
+      return;
+    }
+
+    if (
+      currentActive &&
+      selectedStrokeIndex !== null &&
+      selectedStrokeIndex >= currentActive.strokes.length
+    ) {
+      setSelectedStrokeIndex(
+        currentActive.strokes.length > 0
+          ? currentActive.strokes.length - 1
+          : null,
+      );
+    }
+  };
+
   const handleUndo = () => {
     if (pastLevels.length === 0) return;
     const previousState = pastLevels[pastLevels.length - 1];
     setPastLevels((prev) => prev.slice(0, -1));
     setFutureLevels((prev) => [JSON.parse(JSON.stringify(commands)), ...prev]);
     setCommands(previousState);
-    if (
-      activeCommandId &&
-      !previousState.find((c) => c.id === activeCommandId)
-    ) {
-      setActiveCommandId(previousState.length > 0 ? previousState[0].id : null);
-      setSelectedStrokeIndex(null);
-    }
+    syncSelectionAfterHistoryChange(previousState);
   };
 
   const handleRedo = () => {
@@ -388,6 +449,7 @@ function App() {
     setFutureLevels((prev) => prev.slice(1));
     setPastLevels((prev) => [...prev, JSON.parse(JSON.stringify(commands))]);
     setCommands(nextState);
+    syncSelectionAfterHistoryChange(nextState);
   };
 
   // --- 永続化される表示設定 ---
@@ -739,114 +801,138 @@ function App() {
   };
 
   const handleDuplicateCommand = (id: string) => {
+    const current = commandsRef.current;
+    const cmdToCopy = current.find((c) => c.id === id);
+    if (!cmdToCopy) return;
+
     saveToHistory();
-    setCommands((prev) => {
-      const cmdToCopy = prev.find((c) => c.id === id);
-      if (!cmdToCopy) return prev;
-      const duplicatedCommand = createPastedCommand(cmdToCopy, prev);
-      const index = prev.findIndex((c) => c.id === id);
-      const next = [...prev];
-      if (index === -1) {
-        next.push(duplicatedCommand);
-      } else {
-        next.splice(index + 1, 0, duplicatedCommand);
-      }
-      // 副作用: 新しいコマンドを選択
-      setActiveCommandId(duplicatedCommand.id);
-      setSelectedStrokeIndex(0);
-      setSelectionType("stroke");
-      return next;
-    });
+    const duplicatedCommand = createPastedCommand(cmdToCopy, current);
+    const index = current.findIndex((c) => c.id === id);
+    const next = [...current];
+    if (index === -1) {
+      next.push(duplicatedCommand);
+    } else {
+      next.splice(index + 1, 0, duplicatedCommand);
+    }
+
+    setCommands(next);
+    setActiveCommandId(duplicatedCommand.id);
+    setSelectedStrokeIndex(
+      duplicatedCommand.strokes && duplicatedCommand.strokes.length > 0 ? 0 : null,
+    );
+    setSelectionType("stroke");
   };
 
   const handleCopyCommand = (id?: string) => {
-    const targetId = id || activeCommandId;
+    const targetId = id || activeCommandIdRef.current;
     if (!targetId) return;
     // commandsRef で最新の commands を参照（stale closure 対策）
     const target = commandsRef.current.find((c) => c.id === targetId);
     if (!target) return;
     setCommandClipboard(JSON.parse(JSON.stringify(target)));
+    toast("コマンドをコピーしました");
+  };
+
+  const appendStrokeToCommand = (commandId: string, newStroke: Point[]) => {
+    const targetCmd = commandsRef.current.find((c) => c.id === commandId);
+    if (!targetCmd) return;
+
+    saveToHistory();
+    const insertedIndex = targetCmd.strokes.length;
+    setCommands((prev) =>
+      prev.map((cmd) => {
+        if (cmd.id !== commandId) return cmd;
+        const newStrokes = [...cmd.strokes, newStroke];
+        return {
+          ...cmd,
+          strokes: newStrokes,
+          points: newStrokes[0] || [],
+        };
+      }),
+    );
+    setSelectedStrokeIndex(insertedIndex);
+    setSelectionType("stroke");
   };
 
   const handleAddLineAction = (commandId: string) => {
-    saveToHistory();
     const center = getCurrentCenter();
     const defaultPoints: Point[] = [
       { x: center.x, y: center.y - 50 },
       { x: center.x, y: center.y + 50 },
     ];
-    const newStroke = resamplePath(defaultPoints, 0.4);
-
-    setCommands((prev) => {
-      const updatedCommands = prev.map((cmd) => {
-        if (cmd.id !== commandId) return cmd;
-        const newStrokes = [...cmd.strokes, newStroke];
-        return { ...cmd, strokes: newStrokes };
-      });
-      // 更新後のコマンドを見つけて、新しいストローク（末尾）を選択
-      const targetCmd = updatedCommands.find((c) => c.id === commandId);
-      if (targetCmd) {
-        setSelectedStrokeIndex(targetCmd.strokes.length - 1);
-      }
-      return updatedCommands;
-    });
-    setSelectionType("stroke");
+    appendStrokeToCommand(commandId, resamplePath(defaultPoints, 0.4));
   };
 
   const handleAddTapAction = (commandId: string) => {
-    saveToHistory();
     const center = getCurrentCenter();
-    const newTap: Point[] = [{ x: center.x, y: center.y }];
+    appendStrokeToCommand(commandId, [{ x: center.x, y: center.y }]);
+  };
 
-    setCommands((prev) => {
-      const updatedCommands = prev.map((cmd) => {
-        if (cmd.id !== commandId) return cmd;
-        const newStrokes = [...cmd.strokes, newTap];
-        return { ...cmd, strokes: newStrokes };
-      });
-      const targetCmd = updatedCommands.find((c) => c.id === commandId);
-      if (targetCmd) {
-        setSelectedStrokeIndex(targetCmd.strokes.length - 1);
-      }
-      return updatedCommands;
-    });
-    setSelectionType("stroke");
+  // Shift + クリック / ドラッグでキャンバス上に直接アクションを追加する
+  const handleQuickAddAction = (
+    action:
+      | { type: "tap"; point: Point }
+      | { type: "line"; start: Point; end: Point },
+  ) => {
+    const targetId = activeCommandIdRef.current;
+    if (!targetId) {
+      toast("先にコマンドを選択または新規作成してください", "info");
+      return;
+    }
+    if (action.type === "tap") {
+      appendStrokeToCommand(targetId, [
+        { x: Math.round(action.point.x), y: Math.round(action.point.y) },
+      ]);
+      toast("タップを追加しました");
+    } else {
+      const start = {
+        x: Math.round(action.start.x),
+        y: Math.round(action.start.y),
+      };
+      const end = {
+        x: Math.round(action.end.x),
+        y: Math.round(action.end.y),
+      };
+      appendStrokeToCommand(targetId, resamplePath([start, end], 0.4));
+      toast("スワイプ線を追加しました");
+    }
   };
 
   const handlePasteCommand = () => {
     if (!commandClipboard) return;
 
     saveToHistory();
-    // setCommands の関数型更新内で prev（最新値）を使って名前・色を決定
-    setCommands((prev) => {
-      const insertedCommand = createPastedCommand(commandClipboard, prev);
-      const insertAfterIndex = activeCommandId
-        ? prev.findIndex((c) => c.id === activeCommandId)
-        : -1;
-      const next = [...prev];
-      if (insertAfterIndex === -1) {
-        next.push(insertedCommand);
-      } else {
-        next.splice(insertAfterIndex + 1, 0, insertedCommand);
-      }
-      // 副作用: ペーストしたコマンドを選択
-      setActiveCommandId(insertedCommand.id);
-      setSelectedStrokeIndex(
-        insertedCommand.strokes && insertedCommand.strokes.length > 0 ? 0 : null,
-      );
-      setSelectionType("stroke");
-      return next;
-    });
+    const current = commandsRef.current;
+    const insertedCommand = createPastedCommand(commandClipboard, current);
+    const currentActiveId = activeCommandIdRef.current;
+    const insertAfterIndex = currentActiveId
+      ? current.findIndex((c) => c.id === currentActiveId)
+      : -1;
+    const next = [...current];
+    if (insertAfterIndex === -1) {
+      next.push(insertedCommand);
+    } else {
+      next.splice(insertAfterIndex + 1, 0, insertedCommand);
+    }
+
+    setCommands(next);
+    setActiveCommandId(insertedCommand.id);
+    setSelectedStrokeIndex(
+      insertedCommand.strokes && insertedCommand.strokes.length > 0 ? 0 : null,
+    );
+    setSelectionType("stroke");
   };
 
   const handleCopyAction = (index?: number) => {
-    const targetIndex = index !== undefined ? index : selectedStrokeIndex;
-    if (!selectedCommand || targetIndex === null) return;
-    if (targetIndex < 0 || targetIndex >= selectedCommand.strokes.length)
-      return;
+    const currentActiveId = activeCommandIdRef.current;
+    const targetCmd = commandsRef.current.find((c) => c.id === currentActiveId);
+    const targetIndex =
+      index !== undefined ? index : selectedStrokeIndexRef.current;
+    if (!targetCmd || targetIndex === null) return;
+    if (targetIndex < 0 || targetIndex >= targetCmd.strokes.length) return;
 
-    const sourceStroke = selectedCommand.strokes[targetIndex];
-    const sourceMetadata = selectedCommand.strokeMetadata?.[targetIndex];
+    const sourceStroke = targetCmd.strokes[targetIndex];
+    const sourceMetadata = targetCmd.strokeMetadata?.[targetIndex];
     setActionClipboard({
       stroke: JSON.parse(JSON.stringify(sourceStroke)),
       metadata: sourceMetadata
@@ -856,36 +942,42 @@ function App() {
           }
         : undefined,
     });
+    toast("アクションをコピーしました");
   };
 
   const handlePasteAction = (index?: number) => {
-    if (!activeCommandId || !actionClipboard) return;
+    const currentActiveId = activeCommandIdRef.current;
+    const clipboard = actionClipboardRef.current;
+    if (!currentActiveId || !clipboard) return;
+
+    const targetCmd = commandsRef.current.find((c) => c.id === currentActiveId);
+    if (!targetCmd) return;
+
+    const currentStrokeIdx = selectedStrokeIndexRef.current;
+    const insertIndex =
+      index !== undefined
+        ? index + 1
+        : currentStrokeIdx !== null &&
+            currentStrokeIdx >= 0 &&
+            currentStrokeIdx < targetCmd.strokes.length
+          ? currentStrokeIdx + 1
+          : targetCmd.strokes.length;
 
     saveToHistory();
 
-    let insertedStrokeIndex: number | null = null;
     setCommands((prev) =>
       prev.map((cmd) => {
-        if (cmd.id !== activeCommandId) return cmd;
+        if (cmd.id !== currentActiveId) return cmd;
 
-        const insertIndex =
-          index !== undefined
-            ? index + 1
-            : selectedStrokeIndex !== null &&
-              selectedStrokeIndex >= 0 &&
-              selectedStrokeIndex < cmd.strokes.length
-              ? selectedStrokeIndex + 1
-              : cmd.strokes.length;
-        insertedStrokeIndex = insertIndex;
-
-        const pastedStroke: Point[] = actionClipboard.stroke.map((p) => ({
+        const pastedStroke: Point[] = clipboard.stroke.map((p) => ({
           x: p.x + 10,
           y: p.y + 10,
         }));
         const newStrokes = [...cmd.strokes];
         newStrokes.splice(insertIndex, 0, pastedStroke);
 
-        const shouldKeepMetadata = Boolean(cmd.strokeMetadata) || Boolean(actionClipboard.metadata);
+        const shouldKeepMetadata =
+          Boolean(cmd.strokeMetadata) || Boolean(clipboard.metadata);
         let newMetadata = cmd.strokeMetadata;
         if (shouldKeepMetadata) {
           const metadata = cmd.strokeMetadata ? [...cmd.strokeMetadata] : [];
@@ -893,8 +985,8 @@ function App() {
             metadata.push({});
           }
           metadata.splice(insertIndex, 0, {
-            waitAfter: actionClipboard.metadata?.waitAfter,
-            tapDuration: actionClipboard.metadata?.tapDuration,
+            waitAfter: clipboard.metadata?.waitAfter,
+            tapDuration: clipboard.metadata?.tapDuration,
           });
           newMetadata = metadata;
         }
@@ -908,10 +1000,8 @@ function App() {
       }),
     );
 
-    if (insertedStrokeIndex !== null) {
-      setSelectedStrokeIndex(insertedStrokeIndex);
-      setSelectionType("stroke");
-    }
+    setSelectedStrokeIndex(insertIndex);
+    setSelectionType("stroke");
   };
 
   const handleFileUpload = async (file: File) => {
@@ -999,14 +1089,20 @@ function App() {
     updateSelectedStroke(rotateStrokePoints(points, newAngleRaw), saveHistory);
   };
 
-  const handleDurationChange = (newDur: number) => {
+  const handleDurationChange = (newDur: number, saveHistory = true) => {
     if (!activeCommandId) return;
     if (selectedStrokeIndex !== null) {
       const points = getSelectedStrokePoints();
       if (!points || points.length < 2) return;
       const newPoints = resamplePath(points, newDur);
-      updateSelectedStroke(newPoints);
+      updateSelectedStroke(newPoints, saveHistory);
     }
+  };
+
+  const handleCurveRatioChange = (ratio: number, saveHistory = true) => {
+    const points = getSelectedStrokePoints();
+    if (!points || points.length < 2) return;
+    updateSelectedStroke(curveStrokePoints(points, ratio), saveHistory);
   };
 
   const handleNudge = useCallback(
@@ -1135,10 +1231,18 @@ function App() {
             ? [selectedStrokeIndex]
             : cmd.strokes.map((_, i) => i);
 
+        // コマンド全体選択時は、全対象ストローク共通のバウンディングボックス中心で反転する
+        const groupCenter =
+          selectedStrokeIndex === null
+            ? getStrokesBoundingCenter(
+                cmd.strokes.filter((_, i) => indicesToModify.includes(i)),
+              )
+            : undefined;
+
         const newStrokes = cmd.strokes.map((stroke, index) => {
           if (!indicesToModify.includes(index) || stroke.length === 0)
             return stroke;
-          return flipStrokePoints(stroke, direction);
+          return flipStrokePoints(stroke, direction, groupCenter);
         });
 
         const legacyPoints =
@@ -1158,6 +1262,11 @@ function App() {
   const currentLength = useMemo(() => {
     const points = getSelectedStrokePoints();
     return points ? calculateLength(points) : 0;
+  }, [getSelectedStrokePoints]);
+
+  const currentCurveRatio = useMemo(() => {
+    const points = getSelectedStrokePoints();
+    return points ? calculateCurveRatio(points) : 0;
   }, [getSelectedStrokePoints]);
 
   const currentStartX = useMemo(() => {
@@ -1192,6 +1301,22 @@ function App() {
     return 0;
   }, [getSelectedStrokePoints]);
 
+  // 孤立した（1つだけになった）グループIDを解除するヘルパー
+  const cleanupSingleGroups = (
+    metadata: { waitAfter?: number; groupId?: string; tapDuration?: number }[],
+  ) => {
+    return metadata.map((meta, idx) => {
+      if (!meta.groupId) return meta;
+      const samePrev = idx > 0 && metadata[idx - 1]?.groupId === meta.groupId;
+      const sameNext =
+        idx < metadata.length - 1 && metadata[idx + 1]?.groupId === meta.groupId;
+      if (!samePrev && !sameNext) {
+        return { ...meta, groupId: undefined };
+      }
+      return meta;
+    });
+  };
+
   // Duration Sync:
   // If stroke selected -> Show stroke duration
   // If command selected -> Show total sequential duration (Read only preferably, or editable as global scale?)
@@ -1206,70 +1331,30 @@ function App() {
         const s = selectedCommand.strokes[selectedStrokeIndex];
         // For tap, use tapDuration
         if (isTapStroke(s)) {
-          const strokeTapDuration = 
+          const strokeTapDuration =
             selectedCommand.strokeMetadata?.[selectedStrokeIndex]?.tapDuration;
-          return strokeTapDuration !== undefined 
-            ? strokeTapDuration 
-            : (selectedCommand.tapDuration || 0.05);
+          return strokeTapDuration !== undefined
+            ? strokeTapDuration
+            : selectedCommand.tapDuration || 0.05;
         }
         // Allow shorter durations like 0.1s. Min 0.1s for safety for paths.
         return Math.max(0.1, Math.round(((s.length - 1) / 60) * 100) / 100);
       } else {
-        // Total sequential time: Sum(strokes) + Sum(gaps)
-        const waitTime =
-          selectedCommand.waitDuration !== undefined
-            ? selectedCommand.waitDuration
-            : 0.1;
-        let total = 0;
-        selectedCommand.strokes.forEach((s, i) => {
-          if (i > 0) total += waitTime;
-          if (isTapStroke(s)) {
-            const metaTap = selectedCommand.strokeMetadata?.[i]?.tapDuration;
-            total += metaTap !== undefined ? metaTap : (selectedCommand.tapDuration || 0.05);
-          } else {
-            total += Math.max(0.1, (s.length - 1) / 60);
-          }
-        });
-        return Math.round(total * 100) / 100;
+        // 再生タイムラインと同一のロジックでグループ化・個別待機時間を反映した合計所要時間を算出
+        const { totalDuration } = buildPlaybackTimeline(selectedCommand);
+        return Math.round(totalDuration * 100) / 100;
       }
     }
     return 0;
   }, [selectedCommand, selectedStrokeIndex]);
 
-  const handleDeleteSelectedAction = () => {
-    if (!activeCommandId || selectedStrokeIndex === null) return;
+  // 指定したコマンド・インデックスのストロークを削除する共通ヘルパー
+  const deleteStrokeFromCommand = (commandId: string, strokeIndex: number) => {
+    const targetCmd = commandsRef.current.find((c) => c.id === commandId);
+    const remainingCount = targetCmd
+      ? Math.max(0, targetCmd.strokes.length - 1)
+      : 0;
 
-    saveToHistory();
-    setCommands((prev) =>
-      prev.map((cmd) => {
-        if (cmd.id !== activeCommandId) return cmd;
-        const newStrokes = [...cmd.strokes];
-        if (selectedStrokeIndex < newStrokes.length) {
-          newStrokes.splice(selectedStrokeIndex, 1);
-        }
-        // strokeMetadata も同期して削除
-        let newMetadata = cmd.strokeMetadata;
-        if (newMetadata) {
-          newMetadata = [...newMetadata];
-          if (selectedStrokeIndex < newMetadata.length) {
-            newMetadata.splice(selectedStrokeIndex, 1);
-          }
-        }
-        return { ...cmd, strokes: newStrokes, strokeMetadata: newMetadata };
-      }),
-    );
-
-    // 選択インデックスの調整
-    if (selectedStrokeIndex > 0) {
-      setSelectedStrokeIndex(selectedStrokeIndex - 1);
-    } else {
-      setSelectedStrokeIndex(null);
-    }
-  };
-
-  // ==== Sidebar用ストローク削除・複製コールバック ====
-  // Sidebar内でpropsのcommandを直接操作するとstaleデータを参照する問題を解決
-  const handleDeleteStroke = (commandId: string, strokeIndex: number) => {
     saveToHistory();
     setCommands((prev) =>
       prev.map((cmd) => {
@@ -1278,23 +1363,48 @@ function App() {
         if (strokeIndex < newStrokes.length) {
           newStrokes.splice(strokeIndex, 1);
         }
-        // strokeMetadata も同期して削除
+        // strokeMetadata も同期して削除し、1件だけ残ったグループIDをクリーンアップ
         let newMetadata = cmd.strokeMetadata;
         if (newMetadata) {
           newMetadata = [...newMetadata];
           if (strokeIndex < newMetadata.length) {
             newMetadata.splice(strokeIndex, 1);
           }
+          newMetadata = cleanupSingleGroups(newMetadata);
         }
-        return { ...cmd, strokes: newStrokes, strokeMetadata: newMetadata };
+        return {
+          ...cmd,
+          strokes: newStrokes,
+          strokeMetadata: newMetadata,
+          points: newStrokes[0] || [],
+        };
       }),
     );
-    // 選択インデックスの調整
-    if (selectedStrokeIndex === strokeIndex) {
-      setSelectedStrokeIndex(null);
-    } else if (selectedStrokeIndex !== null && strokeIndex < selectedStrokeIndex) {
-      setSelectedStrokeIndex(selectedStrokeIndex - 1);
+
+    if (activeCommandIdRef.current === commandId) {
+      setSelectedStrokeIndex((prevIdx) => {
+        if (prevIdx === null) return null;
+        if (prevIdx === strokeIndex) {
+          return remainingCount > 0
+            ? Math.min(strokeIndex, remainingCount - 1)
+            : null;
+        }
+        if (strokeIndex < prevIdx) {
+          return prevIdx - 1;
+        }
+        return prevIdx;
+      });
     }
+  };
+
+  const handleDeleteSelectedAction = () => {
+    if (!activeCommandId || selectedStrokeIndex === null) return;
+    deleteStrokeFromCommand(activeCommandId, selectedStrokeIndex);
+  };
+
+  // ==== Sidebar用ストローク削除・複製コールバック ====
+  const handleDeleteStroke = (commandId: string, strokeIndex: number) => {
+    deleteStrokeFromCommand(commandId, strokeIndex);
   };
 
   const handleDuplicateStroke = (commandId: string, strokeIndex: number) => {
@@ -1386,6 +1496,11 @@ function App() {
         : 0.1;
 
     for (let i = 0; i < selectedCommand.strokes.length - 1; i++) {
+      // 同一グループで同時実行されるストローク間には待機時間点線を表示しない
+      const groupA = selectedCommand.strokeMetadata?.[i]?.groupId;
+      const groupB = selectedCommand.strokeMetadata?.[i + 1]?.groupId;
+      if (groupA && groupB && groupA === groupB) continue;
+
       const strokeA = selectedCommand.strokes[i];
       const strokeB = selectedCommand.strokes[i + 1];
       if (strokeA.length === 0 || strokeB.length === 0) continue;
@@ -1408,39 +1523,36 @@ function App() {
     return connections;
   }, [selectedCommand]);
 
-  // 全コマンドを書き出す
-  const handleExportAll = async () => {
-    if (commands.length === 0) {
-      alert("書き出すコマンドがありません。");
-      return;
-    }
+  // エクスポート用のデータ形式へ変換するヘルパー
+  const toExportCommandData = (cmd: Command) => {
+    const strokeWaits = cmd.strokes.map(
+      (_, i) => cmd.strokeMetadata?.[i]?.waitAfter ?? cmd.waitDuration ?? 0.1,
+    );
+    return {
+      name: cmd.name,
+      points: [] as Point[],
+      strokes: cmd.strokes,
+      stroke_waits: strokeWaits,
+      tapDuration: cmd.tapDuration,
+      strokeMetadata: cmd.strokeMetadata,
+    };
+  };
 
-    const commandsToExport = commands.map((cmd) => {
-      const strokeWaits = cmd.strokes.map(
-        (_, i) => cmd.strokeMetadata?.[i]?.waitAfter ?? cmd.waitDuration ?? 0.1,
-      );
-      return {
-        name: cmd.name,
-        points: [] as Point[],
-        strokes: cmd.strokes,
-        stroke_waits: strokeWaits,
-        tapDuration: cmd.tapDuration,
-        strokeMetadata: cmd.strokeMetadata,
-      };
-    });
-
+  // バイナリファイルを保存する共通ヘルパー（保存ダイアログのキャンセル時はエラーにしない）
+  const saveBinaryFile = async (
+    binaryContent: Uint8Array,
+    filename: string,
+    description: string,
+  ) => {
     try {
-      const binaryContent = exportMerged(commandsToExport);
-      const filename = `all_commands${exportExtension}`;
-
       // @ts-expect-error showSaveFilePicker は型定義にない
-      if (window.showSaveFilePicker) {
+      if (typeof window.showSaveFilePicker === "function") {
         // @ts-expect-error showSaveFilePicker は型定義にない
         const handle = await window.showSaveFilePicker({
           suggestedName: filename,
           types: [
             {
-              description: "Apple Voice Control Commands",
+              description,
               accept: { "application/octet-stream": [exportExtension] },
             },
           ],
@@ -1462,10 +1574,31 @@ function App() {
         URL.revokeObjectURL(url);
       }
     } catch (error: unknown) {
+      // ユーザーがファイル保存ダイアログをキャンセルした場合は何もしない
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
       console.error("Export Error:", error);
       const msg = error instanceof Error ? error.message : String(error);
       alert(`エクスポートに失敗しました: ${msg}`);
     }
+  };
+
+  // 全コマンドを書き出す
+  const handleExportAll = async () => {
+    if (commands.length === 0) {
+      alert("書き出すコマンドがありません。");
+      return;
+    }
+
+    const commandsToExport = commands.map(toExportCommandData);
+    const binaryContent = exportMerged(commandsToExport);
+    const filename = `all_commands${exportExtension}`;
+    await saveBinaryFile(
+      binaryContent,
+      filename,
+      "Apple Voice Control Commands",
+    );
   };
 
   // 選択中のコマンドを書き出す（設定パネルのボタン用）
@@ -1474,59 +1607,17 @@ function App() {
     const cmd = commands.find((c) => c.id === activeCommandId);
     if (!cmd) return;
 
-    const strokeWaits = cmd.strokes.map(
-      (_, i) => cmd.strokeMetadata?.[i]?.waitAfter ?? cmd.waitDuration ?? 0.1,
-    );
-
-    const commandToExport = {
-      name: cmd.name,
-      points: [] as Point[],
-      strokes: cmd.strokes,
-      stroke_waits: strokeWaits,
-      tapDuration: cmd.tapDuration,
-      strokeMetadata: cmd.strokeMetadata,
-    };
-
-    try {
-      const binaryContent = exportMerged([commandToExport]);
-      let filename = cmd.name;
-      if (!filename.toLowerCase().endsWith(exportExtension)) {
-        filename += exportExtension;
-      }
-
-      // @ts-expect-error showSaveFilePicker は型定義にない
-      if (typeof window.showSaveFilePicker === "function") {
-        // @ts-expect-error showSaveFilePicker は型定義にない
-        const handle = await window.showSaveFilePicker({
-          suggestedName: filename,
-          types: [
-            {
-              description: "Apple Voice Control Command",
-              accept: { "application/octet-stream": [exportExtension] },
-            },
-          ],
-        });
-        const writable = await handle.createWritable();
-        await writable.write(binaryContent);
-        await writable.close();
-      } else {
-        const blob = new Blob([new Uint8Array(binaryContent)], {
-          type: "application/octet-stream",
-        });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
-    } catch (error: unknown) {
-      console.error("Export Error:", error);
-      const msg = error instanceof Error ? error.message : String(error);
-      alert(`エクスポートに失敗しました: ${msg}`);
+    const binaryContent = exportMerged([toExportCommandData(cmd)]);
+    let filename = cmd.name;
+    if (!filename.toLowerCase().endsWith(exportExtension)) {
+      filename += exportExtension;
     }
+
+    await saveBinaryFile(
+      binaryContent,
+      filename,
+      "Apple Voice Control Command",
+    );
   };
 
   // チェックしたコマンドを書き出す
@@ -1541,76 +1632,27 @@ function App() {
     if (targetIds.length === 0) return;
 
     const commandsToExport = targetIds
-      .map((id) => {
-        const cmd = commands.find((c) => c.id === id);
-        if (!cmd) return null;
-
-        const strokeWaits = cmd.strokes.map(
-          (_, i) =>
-            cmd.strokeMetadata?.[i]?.waitAfter ?? cmd.waitDuration ?? 0.1,
-        );
-
-        return {
-          name: cmd.name,
-          points: [] as Point[],
-          strokes: cmd.strokes,
-          stroke_waits: strokeWaits,
-          tapDuration: cmd.tapDuration,
-          strokeMetadata: cmd.strokeMetadata,
-        };
-      })
-      .filter((c) => c !== null);
+      .map((id) => commands.find((c) => c.id === id))
+      .filter((cmd): cmd is Command => Boolean(cmd))
+      .map(toExportCommandData);
 
     if (commandsToExport.length === 0) return;
 
-    try {
-      const binaryContent = exportMerged(commandsToExport);
+    const binaryContent = exportMerged(commandsToExport);
+    let filename =
+      commandsToExport.length === 1
+        ? commandsToExport[0].name
+        : "ExportedCommands";
 
-      let filename =
-        commandsToExport.length === 1
-          ? commandsToExport[0]!.name
-          : "ExportedCommands";
-
-      if (!filename.toLowerCase().endsWith(exportExtension)) {
-        filename += exportExtension;
-      }
-
-      // ファイル保存ロジック
-      // @ts-expect-error showSaveFilePicker は型定義にない
-      if (typeof window.showSaveFilePicker === "function") {
-        // @ts-expect-error showSaveFilePicker は型定義にない
-        const handle = await window.showSaveFilePicker({
-          suggestedName: filename,
-          types: [
-            {
-              description: "Apple Voice Control Command",
-              accept: { "application/octet-stream": [exportExtension] },
-            },
-          ],
-        });
-        const writable = await handle.createWritable();
-        await writable.write(binaryContent);
-        await writable.close();
-      } else {
-        // フォールバック
-        const blob = new Blob([new Uint8Array(binaryContent)], {
-          type: "application/octet-stream",
-        });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      }
-    } catch (error: unknown) {
-      console.error("Export Error:", error);
-      alert(
-        `エクスポートに失敗しました: ${error instanceof Error ? error.message : String(error)}`,
-      );
+    if (!filename.toLowerCase().endsWith(exportExtension)) {
+      filename += exportExtension;
     }
+
+    await saveBinaryFile(
+      binaryContent,
+      filename,
+      "Apple Voice Control Command",
+    );
   };
 
   const handleBatchDelete = async () => {
@@ -1621,16 +1663,21 @@ function App() {
     );
     if (!confirmed) return;
 
+    const idsToDelete = new Set(checkedCommandIds);
+    const remaining = commandsRef.current.filter((c) => !idsToDelete.has(c.id));
+
     saveToHistory();
-    setCommands((prev) => {
-      const remaining = prev.filter((c) => !checkedCommandIds.has(c.id));
-      // 削除対象にアクティブコマンドが含まれていたら次を選択
-      if (activeCommandId && checkedCommandIds.has(activeCommandId)) {
-        setActiveCommandId(remaining.length > 0 ? remaining[0].id : null);
-        setSelectedStrokeIndex(null);
-      }
-      return remaining;
-    });
+    setCommands(remaining);
+
+    // 削除対象にアクティブコマンドが含まれていたら次を選択
+    if (activeCommandId && idsToDelete.has(activeCommandId)) {
+      const nextCmd = remaining.length > 0 ? remaining[0] : null;
+      setActiveCommandId(nextCmd ? nextCmd.id : null);
+      setSelectedStrokeIndex(
+        nextCmd && nextCmd.strokes.length > 0 ? 0 : null,
+      );
+      setSelectionType("stroke");
+    }
 
     // チェック状態をクリア
     setCheckedCommandIds(new Set());
@@ -1673,41 +1720,82 @@ function App() {
   };
 
   const handleGroupStrokes = () => {
-    if (!activeCommandId || checkedStrokeIndices.size < 2) return;
+    const targetId = activeCommandIdRef.current;
+    const targetCmd = commandsRef.current.find((c) => c.id === targetId);
+    if (!targetId || !targetCmd) return;
+
+    const selectedIndices = Array.from(checkedStrokeIndices)
+      .filter((idx) => idx >= 0 && idx < targetCmd.strokes.length)
+      .sort((a, b) => a - b);
+    if (selectedIndices.length < 2) return;
+
+    const selectedSet = new Set(selectedIndices);
+    const insertPos = selectedIndices[0];
+    // 離れたアクション同士を選択しても同時実行として機能するよう連続配置へ並び替える
+    const newOrder: number[] = [];
+    for (let i = 0; i < insertPos; i++) {
+      if (!selectedSet.has(i)) newOrder.push(i);
+    }
+    newOrder.push(...selectedIndices);
+    for (let i = insertPos; i < targetCmd.strokes.length; i++) {
+      if (!selectedSet.has(i)) newOrder.push(i);
+    }
+
     saveToHistory();
     const newGroupId = crypto.randomUUID();
     setCommands((prev) =>
       prev.map((cmd) => {
-        if (cmd.id !== activeCommandId) return cmd;
-        const newMetadata = [...(cmd.strokeMetadata || [])];
-        while (newMetadata.length < cmd.strokes.length) {
-          newMetadata.push({});
+        if (cmd.id !== targetId) return cmd;
+        const baseMetadata = [...(cmd.strokeMetadata || [])];
+        while (baseMetadata.length < cmd.strokes.length) {
+          baseMetadata.push({});
         }
-        checkedStrokeIndices.forEach((idx) => {
-          if (idx < newMetadata.length) {
-            newMetadata[idx] = { ...newMetadata[idx], groupId: newGroupId };
-          }
-        });
-        return { ...cmd, strokeMetadata: newMetadata };
-      })
+
+        const reorderedStrokes = newOrder.map((oldIdx) => cmd.strokes[oldIdx]);
+        const reorderedMetadata = cleanupSingleGroups(
+          newOrder.map((oldIdx) =>
+            selectedSet.has(oldIdx)
+              ? { ...baseMetadata[oldIdx], groupId: newGroupId }
+              : baseMetadata[oldIdx],
+          ),
+        );
+
+        return {
+          ...cmd,
+          strokes: reorderedStrokes,
+          strokeMetadata: reorderedMetadata,
+          points: reorderedStrokes[0] || [],
+        };
+      }),
     );
+
+    setSelectedStrokeIndex((prevIdx) => {
+      if (prevIdx === null) return null;
+      const movedIdx = newOrder.indexOf(prevIdx);
+      return movedIdx !== -1 ? movedIdx : prevIdx;
+    });
     setCheckedStrokeIndices(new Set());
   };
 
   const handleUngroupStrokes = () => {
-    if (!activeCommandId || checkedStrokeIndices.size === 0) return;
+    const targetId = activeCommandIdRef.current;
+    if (!targetId || checkedStrokeIndices.size === 0) return;
+
     saveToHistory();
     setCommands((prev) =>
       prev.map((cmd) => {
-        if (cmd.id !== activeCommandId) return cmd;
+        if (cmd.id !== targetId) return cmd;
         const newMetadata = [...(cmd.strokeMetadata || [])];
         checkedStrokeIndices.forEach((idx) => {
           if (idx < newMetadata.length && newMetadata[idx]) {
             newMetadata[idx] = { ...newMetadata[idx], groupId: undefined };
           }
         });
-        return { ...cmd, strokeMetadata: newMetadata };
-      })
+        return {
+          ...cmd,
+          strokeMetadata: cleanupSingleGroups(newMetadata),
+        };
+      }),
     );
     setCheckedStrokeIndices(new Set());
   };
@@ -1958,30 +2046,26 @@ function App() {
         while (newMetadata.length < cmd.strokes.length) {
           newMetadata.push({});
         }
-        newMetadata = arrayMove(newMetadata, oldIndex, newIndex);
+        newMetadata = cleanupSingleGroups(
+          arrayMove(newMetadata, oldIndex, newIndex),
+        );
 
-        return { ...cmd, strokes: newStrokes, strokeMetadata: newMetadata };
+        return {
+          ...cmd,
+          strokes: newStrokes,
+          strokeMetadata: newMetadata,
+          points: newStrokes[0] || [],
+        };
       }),
     );
-    // If selectedStrokeIndex was pointing to the moved item, we might need to update it,
-    // but simpler to just deselect or keep index?
-    // If we move item at index A to B. And we effectively selected index A.
-    // If we keep selection index A, we are now selecting a different item.
-    // Let's try to track the selection.
-    if (activeCommandId === commandId && selectedStrokeIndex !== null) {
-      if (selectedStrokeIndex === oldIndex) {
-        setSelectedStrokeIndex(newIndex);
-      } else if (
-        oldIndex < selectedStrokeIndex &&
-        newIndex >= selectedStrokeIndex
-      ) {
-        setSelectedStrokeIndex(selectedStrokeIndex - 1);
-      } else if (
-        oldIndex > selectedStrokeIndex &&
-        newIndex <= selectedStrokeIndex
-      ) {
-        setSelectedStrokeIndex(selectedStrokeIndex + 1);
-      }
+    if (activeCommandIdRef.current === commandId) {
+      setSelectedStrokeIndex((prevIdx) => {
+        if (prevIdx === null) return null;
+        if (prevIdx === oldIndex) return newIndex;
+        if (oldIndex < prevIdx && newIndex >= prevIdx) return prevIdx - 1;
+        if (oldIndex > prevIdx && newIndex <= prevIdx) return prevIdx + 1;
+        return prevIdx;
+      });
     }
   };
 
@@ -2004,9 +2088,11 @@ function App() {
 
   // handleDurationChange was here, now moved and fixed
 
-  const handleTapDurationChange = (newDuration: number) => {
+  const handleTapDurationChange = (newDuration: number, saveHistory = true) => {
     if (!activeCommandId) return;
-    saveToHistory();
+    if (saveHistory) {
+      saveToHistory();
+    }
     setCommands((prev) =>
       prev.map((c) => {
         if (c.id !== activeCommandId) return c;
@@ -2082,13 +2168,14 @@ function App() {
     const normalizedName = folderName.trim();
     if (!normalizedName) return;
 
-    setBackgroundFolders((prev) => {
-      if (prev.includes(normalizedName)) {
-        alert("同名のフォルダーが既に存在します。");
-        return prev;
-      }
-      return [...prev, normalizedName];
-    });
+    if (backgroundFolders.includes(normalizedName)) {
+      alert("同名のフォルダーが既に存在します。");
+      return;
+    }
+
+    setBackgroundFolders((prev) =>
+      prev.includes(normalizedName) ? prev : [...prev, normalizedName],
+    );
   };
 
   const handleRenameBackgroundFolder = async (
@@ -2195,6 +2282,13 @@ function App() {
       const isCmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
       const key = e.key.toLowerCase();
 
+      // 操作ガイドを開く / 閉じる (?)
+      if (e.key === "?") {
+        e.preventDefault();
+        setIsHelpOpen((prev) => !prev);
+        return;
+      }
+
       // 元に戻す / やり直す (Cmd/Ctrl + Z / Cmd/Ctrl + Shift + Z)
       if (isCmdOrCtrl && key === "z") {
         e.preventDefault();
@@ -2297,9 +2391,11 @@ function App() {
     commandClipboard,
   ]);
 
-  const handleWaitDurationChange = (newDuration: number) => {
+  const handleWaitDurationChange = (newDuration: number, saveHistory = true) => {
     if (!activeCommandId) return;
-    saveToHistory();
+    if (saveHistory) {
+      saveToHistory();
+    }
     setCommands((prev) =>
       prev.map((c) =>
         c.id === activeCommandId ? { ...c, waitDuration: newDuration } : c,
@@ -2327,9 +2423,14 @@ function App() {
     );
   };
 
-  const handleSelectedStrokeWaitChange = (newDuration: number) => {
+  const handleSelectedStrokeWaitChange = (
+    newDuration: number,
+    saveHistory = true,
+  ) => {
     if (!activeCommandId) return;
-    saveToHistory();
+    if (saveHistory) {
+      saveToHistory();
+    }
     setCommands((prev) =>
       prev.map((c) => {
         if (c.id !== activeCommandId) return c;
@@ -2403,22 +2504,36 @@ function App() {
           activeCommandId={activeCommandId}
           onSelectCommand={setActiveCommandId}
           onDeleteCommand={(id) => {
+            const current = commandsRef.current;
+            const idx = current.findIndex((c) => c.id === id);
+            const newCommands = current.filter((c) => c.id !== id);
+
             saveToHistory();
-            setCommands((prev) => {
-              const idx = prev.findIndex((c) => c.id === id);
-              const newCommands = prev.filter((c) => c.id !== id);
-              // 削除したのが選択中のコマンドなら次を選択
-              if (activeCommandId === id) {
-                if (newCommands.length > 0) {
-                  const nextIdx = Math.min(idx, newCommands.length - 1);
-                  setActiveCommandId(newCommands[nextIdx].id);
-                } else {
-                  setActiveCommandId(null);
-                }
+            setCommands(newCommands);
+
+            // 削除したコマンドがチェック済みだった場合は複数選択セットからも除外する
+            setCheckedCommandIds((prev) => {
+              if (!prev.has(id)) return prev;
+              const next = new Set(prev);
+              next.delete(id);
+              return next;
+            });
+
+            // 削除したのが選択中のコマンドなら次を選択
+            if (activeCommandId === id) {
+              if (newCommands.length > 0) {
+                const nextIdx = Math.min(idx, newCommands.length - 1);
+                const nextCmd = newCommands[nextIdx];
+                setActiveCommandId(nextCmd.id);
+                setSelectedStrokeIndex(
+                  nextCmd.strokes.length > 0 ? 0 : null,
+                );
+              } else {
+                setActiveCommandId(null);
                 setSelectedStrokeIndex(null);
               }
-              return newCommands;
-            });
+              setSelectionType("stroke");
+            }
           }}
           onDuplicateCommand={handleDuplicateCommand}
           onToggleVisibility={(id) => {
@@ -2634,6 +2749,7 @@ function App() {
               <button
                 onClick={() => setIsRightSidebarOpen(!isRightSidebarOpen)}
                 className="p-1.5 text-gray-500 hover:bg-gray-100 rounded transition-colors"
+                title={isRightSidebarOpen ? "設定パネルを閉じる" : "設定パネルを開く"}
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -2655,6 +2771,14 @@ function App() {
                     d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
                   />
                 </svg>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsHelpOpen(true)}
+                className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                title="ショートカット＆操作ガイド (?)"
+              >
+                <HelpCircle className="h-5 w-5" />
               </button>
               <div className="h-4 w-px bg-gray-300 mx-2" />
               <AuthStatus />
@@ -2752,6 +2876,7 @@ function App() {
                   }}
                   markerPositions={markerPositions}
                   scale={scale}
+                  onQuickAddAction={handleQuickAddAction}
                 />
               </DeviceFrame>
             </div>
@@ -2893,8 +3018,6 @@ function App() {
             onSelectModel={setSelectedModelId}
             orientation={orientation}
             onSelectOrientation={setOrientation}
-            scale={scale}
-            onScaleChange={handleScaleChange}
             onNudge={(dx, dy, saveHistory = true) => {
               if (dx !== 0) handleNudge("x", dx, saveHistory);
               if (dy !== 0) handleNudge("y", dy, saveHistory);
@@ -2929,22 +3052,20 @@ function App() {
                 );
               }
             }}
-            onEnterFullscreen={handleToggleFullscreen}
-            isFullscreen={isFullscreen}
             duration={displayDuration}
             onDurationChange={handleDurationChange}
-            isPlaying={isPlaying}
-            onTogglePlay={togglePlay}
             angle={currentAngle}
             onAngleChange={handleAngleChange}
             length={currentLength}
-            onLengthChange={(newLen) => {
+            onLengthChange={(newLen, saveHistory = true) => {
               if (selectedStrokeIndex !== null) {
                 const points = getSelectedStrokePoints();
                 if (!points || points.length < 2) return;
-                updateSelectedStroke(scaleStrokePoints(points, newLen));
+                updateSelectedStroke(scaleStrokePoints(points, newLen), saveHistory);
               }
             }}
+            curveRatio={currentCurveRatio}
+            onCurveChange={handleCurveRatioChange}
             onCurve={handleCurve}
             onStraight={handleMakeStraight}
             onFlip={handleFlip}
@@ -3012,6 +3133,10 @@ function App() {
           </button>
         )}
       </div>
+      <ShortcutHelpModal
+        isOpen={isHelpOpen}
+        onClose={() => setIsHelpOpen(false)}
+      />
     </div>
   );
 }

@@ -882,7 +882,8 @@ const SortableCommandItem = React.memo(
       prevProps.editingId === nextProps.editingId &&
       prevProps.selectedStrokeIndex === nextProps.selectedStrokeIndex &&
       prevProps.selectionType === nextProps.selectionType &&
-      prevProps.checkedStrokeIndices === nextProps.checkedStrokeIndices
+      prevProps.checkedStrokeIndices === nextProps.checkedStrokeIndices &&
+      prevProps.canPasteAction === nextProps.canPasteAction
     );
   },
 );

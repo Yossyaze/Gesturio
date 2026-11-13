@@ -35,16 +35,14 @@ interface ControlPanelProps {
   onTogglePoints: (show: boolean) => void;
   selectedCommandShowPoints?: boolean; // <-- 追加: 選択中アクション個別の設定
   onToggleCommandPoints?: (show: boolean) => void; // <-- 追加: 選択中アクション個別の設定変更
-  onEnterFullscreen: () => void;
-  isFullscreen?: boolean;
   duration: number;
-  onDurationChange: (duration: number) => void;
-  isPlaying: boolean;
-  onTogglePlay: () => void;
+  onDurationChange: (duration: number, saveHistory?: boolean) => void;
   angle: number;
   onAngleChange: (angle: number, saveHistory?: boolean) => void;
   length: number;
-  onLengthChange: (length: number) => void;
+  onLengthChange: (length: number, saveHistory?: boolean) => void;
+  curveRatio?: number;
+  onCurveChange?: (ratio: number, saveHistory?: boolean) => void;
   startX?: number;
   startY?: number;
   endX?: number;
@@ -58,19 +56,17 @@ interface ControlPanelProps {
   onStraight: () => void;
   isActionSelected?: boolean;
   waitDuration?: number;
-  onWaitDurationChange?: (duration: number) => void;
+  onWaitDurationChange?: (duration: number, saveHistory?: boolean) => void;
   onApplyWaitToAll?: (duration: number) => void;
-  scale: number;
-  onScaleChange: (scale: number) => void;
   selectedStrokeWait?: number;
-  onSelectedStrokeWaitChange?: (duration: number) => void;
+  onSelectedStrokeWaitChange?: (duration: number, saveHistory?: boolean) => void;
   selectionType?: "stroke" | "wait";
   onDeleteSelectedAction?: () => void;
   onFlipAngle?: () => void;
   onFlip?: (direction: "horizontal" | "vertical") => void;
   isTap?: boolean;
   tapDuration?: number;
-  onTapDurationChange?: (duration: number) => void;
+  onTapDurationChange?: (duration: number, saveHistory?: boolean) => void;
 
   // お気に入り環境設定
   favoriteEnvironments?: import("../api").EnvironmentSettings[];
@@ -160,8 +156,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onSelectModel,
   orientation,
   onSelectOrientation,
-  scale,
-  onScaleChange,
   onNudge,
   onExport,
   onBackgroundImageUpload,
@@ -181,16 +175,14 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onTogglePoints,
   selectedCommandShowPoints,
   onToggleCommandPoints,
-  onEnterFullscreen,
-  isFullscreen,
   duration,
   onDurationChange,
-  isPlaying,
-  onTogglePlay,
   angle,
   onAngleChange,
   length,
   onLengthChange,
+  curveRatio = 0,
+  onCurveChange,
   onCurve,
   onStraight,
   startX,
@@ -222,6 +214,37 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
 }) => {
   const { confirm, prompt } = useDialog();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // スライダードラッグ中は初回変更時のみ Undo 履歴を保存する
+  const isSliderDraggingRef = useRef(false);
+  const hasSavedSliderHistoryRef = useRef(false);
+
+  const handleSliderPointerDown = useCallback(() => {
+    isSliderDraggingRef.current = true;
+    hasSavedSliderHistoryRef.current = false;
+  }, []);
+
+  const consumeSliderSaveHistory = useCallback((): boolean => {
+    if (!isSliderDraggingRef.current) return true;
+    if (!hasSavedSliderHistoryRef.current) {
+      hasSavedSliderHistoryRef.current = true;
+      return true;
+    }
+    return false;
+  }, []);
+
+  useEffect(() => {
+    const resetSliderDrag = () => {
+      isSliderDraggingRef.current = false;
+      hasSavedSliderHistoryRef.current = false;
+    };
+    window.addEventListener("pointerup", resetSliderDrag);
+    window.addEventListener("pointercancel", resetSliderDrag);
+    return () => {
+      window.removeEventListener("pointerup", resetSliderDrag);
+      window.removeEventListener("pointercancel", resetSliderDrag);
+    };
+  }, []);
 
   const formatCoord = (n: number) => Math.round(n);
 
@@ -400,28 +423,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         <h2 className="text-xs font-bold text-gray-500 tracking-wider uppercase">
           プロパティ
         </h2>
-        {!isFullscreen && (
-          <button
-            onClick={onEnterFullscreen}
-            className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded"
-            title="最大化"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"
-              />
-            </svg>
-          </button>
-        )}
       </div>
 
       <div className="flex border-b border-gray-200 bg-gray-50 shrink-0">
@@ -675,49 +676,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                     開始/終了点(全体)
                   </button>
                 </div>
-              </div>
-
-              {/* Zoom Control */}
-              <div className="flex items-center space-x-2 bg-gray-50 p-1.5 rounded-md border border-gray-200">
-                <button
-                  onClick={() => onScaleChange(scale / 1.1)}
-                  className="p-1 text-gray-400 hover:text-gray-600 hover:bg-white rounded transition-colors"
-                >
-                  <svg
-                    className="h-4 w-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M20 12H4"
-                    />
-                  </svg>
-                </button>
-                <div className="flex-1 flex items-center justify-center text-xs font-mono text-gray-500">
-                  ズーム: {Math.round(scale * 100)}%
-                </div>
-                <button
-                  onClick={() => onScaleChange(scale * 1.1)}
-                  className="p-1 text-gray-400 hover:text-gray-600 hover:bg-white rounded transition-colors"
-                >
-                  <svg
-                    className="h-4 w-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 4v16m8-8H4"
-                    />
-                  </svg>
-                </button>
               </div>
 
               <div>
@@ -1085,8 +1043,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                   </div>
                 </div>
 
-                {/* Action-specific Points Toggle */}
-                {onToggleCommandPoints && (
+                {/* Action-specific Points Toggle (スワイプ線のみ表示) */}
+                {!isTap && onToggleCommandPoints && (
                   <div>
                     <div className="flex justify-between mb-1 items-center">
                       <label className="text-xs font-medium text-gray-600">
@@ -1171,272 +1129,299 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                     max={isTap ? "1.0" : "5.0"}
                     step="0.01"
                     value={isTap ? (tapDuration ?? 0.05) : duration}
-                    onChange={(e) =>
-                      isTap
-                        ? onTapDurationChange?.(parseFloat(e.target.value))
-                        : onDurationChange(parseFloat(e.target.value))
-                    }
+                    onPointerDown={handleSliderPointerDown}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      const shouldSave = consumeSliderSaveHistory();
+                      if (isTap) {
+                        onTapDurationChange?.(val, shouldSave);
+                      } else {
+                        onDurationChange(val, shouldSave);
+                      }
+                    }}
                     className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
                   />
                 </div>
 
-                {/* Angle */}
-                <div>
-                  <div className="flex justify-between mb-1 items-center">
-                    <label className="text-xs font-medium text-gray-600">
-                      回転
-                    </label>
-                    <div className="flex items-center space-x-2">
-                      <div className="flex items-center space-x-1">
-                        <BufferedNumberInput
-                          minVal={0}
-                          maxVal={1024}
-                          step="1"
-                          value={angle}
-                          onChange={onAngleChange}
-                          format={(v) => Math.round(v).toString()}
-                          className="w-12 text-xs font-mono bg-gray-100 px-1 py-0.5 rounded border border-transparent focus:border-purple-500 focus:bg-white text-right outline-none transition-colors"
-                        />
-                        <span className="text-[10px] text-gray-400">/1024</span>
+                {/* スワイプ専用プロパティ（回転・スケール・カーブ） */}
+                {!isTap && (
+                  <>
+                    {/* Angle */}
+                    <div>
+                      <div className="flex justify-between mb-1 items-center">
+                        <label className="text-xs font-medium text-gray-600">
+                          回転
+                        </label>
+                        <div className="flex items-center space-x-2">
+                          <div className="flex items-center space-x-1">
+                            <BufferedNumberInput
+                              minVal={0}
+                              maxVal={1024}
+                              step="1"
+                              value={angle}
+                              onChange={onAngleChange}
+                              format={(v) => Math.round(v).toString()}
+                              className="w-12 text-xs font-mono bg-gray-100 px-1 py-0.5 rounded border border-transparent focus:border-purple-500 focus:bg-white text-right outline-none transition-colors"
+                            />
+                            <span className="text-[10px] text-gray-400">/1024</span>
+                          </div>
+                          <div className="flex items-center space-x-1">
+                            <BufferedNumberInput
+                              minVal={0}
+                              maxVal={360}
+                              step="0.1"
+                              value={(angle / 1024) * 360}
+                              onChange={(deg) => onAngleChange((deg / 360) * 1024)}
+                              format={(v) => Number(v).toFixed(1)}
+                              className="w-20 text-xs font-mono bg-gray-100 px-1 py-0.5 rounded border border-transparent focus:border-purple-500 focus:bg-white text-right outline-none transition-colors"
+                            />
+                            <span className="text-xs text-gray-500">°</span>
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex items-center space-x-1">
-                        <BufferedNumberInput
-                          minVal={0}
-                          maxVal={360}
-                          step="0.1"
-                          value={(angle / 1024) * 360}
-                          onChange={(deg) => onAngleChange((deg / 360) * 1024)}
-                          format={(v) => Number(v).toFixed(1)}
-                          className="w-20 text-xs font-mono bg-gray-100 px-1 py-0.5 rounded border border-transparent focus:border-purple-500 focus:bg-white text-right outline-none transition-colors"
-                        />
-                        <span className="text-xs text-gray-500">°</span>
+
+                      {/* 回転方向の微調整ボタン */}
+                      <div className="flex justify-between items-center mb-1 mt-1">
+                        <button
+                          onPointerDown={() => startPress(-1)}
+                          onPointerUp={stopPress}
+                          onPointerLeave={stopPress}
+                          onContextMenu={(e) => e.preventDefault()}
+                          className="p-1 px-2 flex items-center bg-white border border-gray-300 rounded hover:bg-gray-50 active:bg-gray-100 text-[10px] text-gray-600 transition-colors shadow-sm select-none"
+                          title="左回り (-1)"
+                        >
+                          <svg
+                            className="w-3.5 h-3.5 mr-1 text-purple-500"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+                            />
+                          </svg>
+                          -1
+                        </button>
+                        <button
+                          onPointerDown={() => startPress(1)}
+                          onPointerUp={stopPress}
+                          onPointerLeave={stopPress}
+                          onContextMenu={(e) => e.preventDefault()}
+                          className="p-1 px-2 flex items-center bg-white border border-gray-300 rounded hover:bg-gray-50 active:bg-gray-100 text-[10px] text-gray-600 transition-colors shadow-sm select-none"
+                          title="右回り (+1)"
+                        >
+                          +1
+                          <svg
+                            className="w-3.5 h-3.5 ml-1 text-purple-500"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6"
+                            />
+                          </svg>
+                        </button>
                       </div>
-                    </div>
-                  </div>
 
-                  {/* --- 新規追加: 回転方向の微調整ボタン --- */}
-                  <div className="flex justify-between items-center mb-1 mt-1">
-                    <button
-                      onPointerDown={() => startPress(-1)}
-                      onPointerUp={stopPress}
-                      onPointerLeave={stopPress}
-                      onContextMenu={(e) => e.preventDefault()}
-                      className="p-1 px-2 flex items-center bg-white border border-gray-300 rounded hover:bg-gray-50 active:bg-gray-100 text-[10px] text-gray-600 transition-colors shadow-sm select-none"
-                      title="左回り (-1)"
-                    >
-                      <svg
-                        className="w-3.5 h-3.5 mr-1 text-purple-500"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
-                        />
-                      </svg>
-                      -1
-                    </button>
-                    <button
-                      onPointerDown={() => startPress(1)}
-                      onPointerUp={stopPress}
-                      onPointerLeave={stopPress}
-                      onContextMenu={(e) => e.preventDefault()}
-                      className="p-1 px-2 flex items-center bg-white border border-gray-300 rounded hover:bg-gray-50 active:bg-gray-100 text-[10px] text-gray-600 transition-colors shadow-sm select-none"
-                      title="右回り (+1)"
-                    >
-                      +1
-                      <svg
-                        className="w-3.5 h-3.5 ml-1 text-purple-500"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6"
-                        />
-                      </svg>
-                    </button>
-                  </div>
-                  {/* ------------------------------------- */}
+                      {/* 角度プリセット */}
+                      <div className="grid grid-cols-4 gap-1 mb-2">
+                        <button
+                          onClick={() => onAngleChange(256)}
+                          className="py-1 border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded text-[10px] font-medium flex items-center justify-center transition-colors"
+                        >
+                          ↑ (256)
+                        </button>
+                        <button
+                          onClick={() => onAngleChange(768)}
+                          className="py-1 border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded text-[10px] font-medium flex items-center justify-center transition-colors"
+                        >
+                          ↓ (768)
+                        </button>
+                        <button
+                          onClick={() => onAngleChange(0)}
+                          className="py-1 border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded text-[10px] font-medium flex items-center justify-center transition-colors"
+                        >
+                          ← (0)
+                        </button>
+                        <button
+                          onClick={() => onAngleChange(512)}
+                          className="py-1 border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded text-[10px] font-medium flex items-center justify-center transition-colors"
+                        >
+                          → (512)
+                        </button>
+                      </div>
 
-                  {/* --- 新規追加: 角度プリセット --- */}
-                  <div className="grid grid-cols-4 gap-1 mb-2">
-                    <button
-                      onClick={() => onAngleChange(256)}
-                      className="py-1 border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded text-[10px] font-medium flex items-center justify-center transition-colors"
-                    >
-                      ↑ (256)
-                    </button>
-                    <button
-                      onClick={() => onAngleChange(768)}
-                      className="py-1 border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded text-[10px] font-medium flex items-center justify-center transition-colors"
-                    >
-                      ↓ (768)
-                    </button>
-                    <button
-                      onClick={() => onAngleChange(0)}
-                      className="py-1 border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded text-[10px] font-medium flex items-center justify-center transition-colors"
-                    >
-                      ← (0)
-                    </button>
-                    <button
-                      onClick={() => onAngleChange(512)}
-                      className="py-1 border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded text-[10px] font-medium flex items-center justify-center transition-colors"
-                    >
-                      → (512)
-                    </button>
-                  </div>
-                  {/* ---------------------------------- */}
-
-                  <input
-                    type="range"
-                    min="0"
-                    max="1024"
-                    step="1"
-                    value={angle}
-                    onChange={(e) => onAngleChange(parseFloat(e.target.value))}
-                    className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-purple-600"
-                  />
-                  {/* 左右反転 / 上下反転 ボタン */}
-                  <div className="flex space-x-2 mt-2">
-                    <button
-                      onClick={() => onFlip?.("horizontal")}
-                      className="w-full flex items-center justify-center py-2 border border-blue-200 shadow-sm text-[10px] font-medium rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors"
-                    >
-                      <svg
-                        className="w-3.5 h-3.5 mr-1"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
-                        />
-                      </svg>
-                      左右反転
-                    </button>
-                    <button
-                      onClick={() => onFlip?.("vertical")}
-                      className="w-full flex items-center justify-center py-2 border border-blue-200 shadow-sm text-[10px] font-medium rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors"
-                    >
-                      <svg
-                        className="w-3.5 h-3.5 mr-1"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"
-                        />
-                      </svg>
-                      上下反転
-                    </button>
-                  </div>
-
-                  {onFlipAngle && (
-                    <button
-                      onClick={onFlipAngle}
-                      className="w-full mt-2 flex items-center justify-center px-4 py-1.5 border border-purple-200 shadow-sm text-[10px] font-medium rounded-md text-purple-700 bg-purple-50 hover:bg-purple-100 transition-colors"
-                    >
-                      ↑↓ 角度を反転する
-                    </button>
-                  )}
-                </div>
-
-                {/* Length (Scale) */}
-                <div>
-                  <div className="flex justify-between mb-1 items-center">
-                    <label className="text-xs font-medium text-gray-600">
-                      スケール / 長さ
-                    </label>
-                    <div className="flex items-center space-x-1">
-                      <BufferedNumberInput
-                        minVal={10}
-                        maxVal={1000}
+                      <input
+                        type="range"
+                        min="0"
+                        max="1024"
                         step="1"
-                        value={length}
-                        onChange={onLengthChange}
-                        format={(v) => Math.round(v).toString()}
-                        className="w-14 text-xs font-mono bg-gray-100 px-1 py-0.5 rounded border border-transparent focus:border-green-500 focus:bg-white text-right outline-none transition-colors"
+                        value={angle}
+                        onPointerDown={handleSliderPointerDown}
+                        onChange={(e) =>
+                          onAngleChange(
+                            parseFloat(e.target.value),
+                            consumeSliderSaveHistory(),
+                          )
+                        }
+                        className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-purple-600"
                       />
-                      <span className="text-xs text-gray-500">px</span>
+                      {/* 左右反転 / 上下反転 ボタン */}
+                      <div className="flex space-x-2 mt-2">
+                        <button
+                          onClick={() => onFlip?.("horizontal")}
+                          className="w-full flex items-center justify-center py-2 border border-blue-200 shadow-sm text-[10px] font-medium rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors"
+                        >
+                          <svg
+                            className="w-3.5 h-3.5 mr-1"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
+                            />
+                          </svg>
+                          左右反転
+                        </button>
+                        <button
+                          onClick={() => onFlip?.("vertical")}
+                          className="w-full flex items-center justify-center py-2 border border-blue-200 shadow-sm text-[10px] font-medium rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100 transition-colors"
+                        >
+                          <svg
+                            className="w-3.5 h-3.5 mr-1"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"
+                            />
+                          </svg>
+                          上下反転
+                        </button>
+                      </div>
+
+                      {onFlipAngle && (
+                        <button
+                          onClick={onFlipAngle}
+                          className="w-full mt-2 flex items-center justify-center px-4 py-1.5 border border-purple-200 shadow-sm text-[10px] font-medium rounded-md text-purple-700 bg-purple-50 hover:bg-purple-100 transition-colors"
+                        >
+                          ↑↓ 角度を反転する
+                        </button>
+                      )}
                     </div>
-                  </div>
-                  <div className="flex space-x-2 mb-2">
-                    <button
-                      onClick={() => onLengthChange(170)}
-                      className="flex-1 py-1 px-2 border border-green-200 bg-green-50 text-green-700 hover:bg-green-100 rounded text-[10px] font-medium transition-colors"
-                    >
-                      170px に揃える
-                    </button>
-                  </div>
-                  <input
-                    type="range"
-                    min="10"
-                    max="1000"
-                    step="10"
-                    value={length || 100}
-                    onChange={(e) => onLengthChange(parseFloat(e.target.value))}
-                    className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-green-600"
-                  />
-                </div>
 
-                {/* Operations */}
-                <div className="pt-2 space-y-2">
-                  <button
-                    onClick={onStraight}
-                    className="w-full flex items-center justify-center px-4 py-2 border border-gray-300 shadow-sm text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors"
-                  >
-                    <svg
-                      className="w-4 h-4 mr-2 text-blue-500"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 12h16m0 0l-4-4m4 4l-4 4"
+                    {/* Length (Scale) */}
+                    <div>
+                      <div className="flex justify-between mb-1 items-center">
+                        <label className="text-xs font-medium text-gray-600">
+                          スケール / 長さ
+                        </label>
+                        <div className="flex items-center space-x-1">
+                          <BufferedNumberInput
+                            minVal={10}
+                            maxVal={1000}
+                            step="1"
+                            value={length}
+                            onChange={onLengthChange}
+                            format={(v) => Math.round(v).toString()}
+                            className="w-14 text-xs font-mono bg-gray-100 px-1 py-0.5 rounded border border-transparent focus:border-green-500 focus:bg-white text-right outline-none transition-colors"
+                          />
+                          <span className="text-xs text-gray-500">px</span>
+                        </div>
+                      </div>
+                      <div className="flex space-x-2 mb-2">
+                        <button
+                          onClick={() => onLengthChange(170)}
+                          className="flex-1 py-1 px-2 border border-green-200 bg-green-50 text-green-700 hover:bg-green-100 rounded text-[10px] font-medium transition-colors"
+                        >
+                          170px に揃える
+                        </button>
+                      </div>
+                      <input
+                        type="range"
+                        min="10"
+                        max="1000"
+                        step="10"
+                        value={length || 100}
+                        onPointerDown={handleSliderPointerDown}
+                        onChange={(e) =>
+                          onLengthChange(
+                            parseFloat(e.target.value),
+                            consumeSliderSaveHistory(),
+                          )
+                        }
+                        className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-green-600"
                       />
-                    </svg>
-                    直線にする
-                  </button>
-                  <button
-                    onClick={onCurve}
-                    className="w-full flex items-center justify-center px-4 py-2 border border-gray-300 shadow-sm text-xs font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors"
-                  >
-                    <svg
-                      className="w-4 h-4 mr-2 text-indigo-500"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207"
-                      />
-                    </svg>
-                    ランダムカーブを適用
-                  </button>
+                    </div>
 
+                    {/* Curve Adjustment Slider & Shape Presets */}
+                    <div>
+                      <div className="flex justify-between mb-1 items-center">
+                        <label className="text-xs font-medium text-gray-600">
+                          カーブ（曲線）
+                        </label>
+                        <span className="text-xs font-mono text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">
+                          {Math.round((curveRatio ?? 0) * 100)}%
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-0.6"
+                        max="0.6"
+                        step="0.02"
+                        value={curveRatio ?? 0}
+                        onPointerDown={handleSliderPointerDown}
+                        onChange={(e) =>
+                          onCurveChange?.(
+                            parseFloat(e.target.value),
+                            consumeSliderSaveHistory(),
+                          )
+                        }
+                        className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                      />
+                      <div className="flex justify-between text-[9px] text-gray-400 font-mono mt-0.5 mb-2">
+                        <span>左カーブ</span>
+                        <span>直線 (0%)</span>
+                        <span>右カーブ</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          onClick={onStraight}
+                          className="flex items-center justify-center px-2 py-1.5 border border-gray-300 shadow-sm text-[11px] font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors"
+                        >
+                          直線に戻す
+                        </button>
+                        <button
+                          onClick={onCurve}
+                          className="flex items-center justify-center px-2 py-1.5 border border-indigo-200 shadow-sm text-[11px] font-medium rounded-md text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition-colors"
+                        >
+                          ランダムカーブ
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Delete Action */}
+                <div className="pt-2">
                   <button
                     onClick={onDeleteSelectedAction}
-                    className="w-full flex items-center justify-center px-4 py-2 mt-2 border border-red-200 shadow-sm text-xs font-medium rounded-md text-red-600 bg-white hover:bg-red-50 transition-colors"
+                    className="w-full flex items-center justify-center px-4 py-2 border border-red-200 shadow-sm text-xs font-medium rounded-md text-red-600 bg-white hover:bg-red-50 transition-colors"
                   >
                     <svg
                       className="w-4 h-4 mr-2"
@@ -1499,10 +1484,15 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                     max="5.00"
                     step="0.05"
                     value={selectedStrokeWait ?? waitDuration ?? 0.1}
+                    onPointerDown={handleSliderPointerDown}
                     onChange={(e) => {
                       const val = parseFloat(e.target.value);
-                      if (selectionType === "wait") onSelectedStrokeWaitChange?.(val);
-                      else onWaitDurationChange?.(val);
+                      const shouldSave = consumeSliderSaveHistory();
+                      if (selectionType === "wait") {
+                        onSelectedStrokeWaitChange?.(val, shouldSave);
+                      } else {
+                        onWaitDurationChange?.(val, shouldSave);
+                      }
                     }}
                     className="w-full h-1.5 bg-blue-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
                   />
@@ -1557,51 +1547,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         </div>
         {/* End Action Settings Tab */}
 
-      {/* Bottom Static Section: Playback & Export */}
-      <div className="p-3 border-t border-gray-200 bg-gray-50 shrink-0 space-y-2">
-        <button
-          onClick={onTogglePlay}
-          className={`w-full flex items-center justify-center px-3 py-2 border border-transparent rounded shadow-sm text-xs font-medium text-white transition-colors ${
-            isPlaying
-              ? "bg-red-600 hover:bg-red-700"
-              : "bg-green-600 hover:bg-green-700"
-          } focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500`}
-        >
-          {isPlaying ? (
-            <>
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-4 w-4 mr-1.5"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              再生停止
-            </>
-          ) : (
-            <>
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-4 w-4 mr-1.5"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
-                  clipRule="evenodd"
-                />
-              </svg>
-              再生
-            </>
-          )}
-        </button>
-
+      {/* Bottom Static Section: Export */}
+      <div className="p-3 border-t border-gray-200 bg-gray-50 shrink-0">
         <button
           onClick={onExport}
           className="w-full flex items-center justify-center px-3 py-2 border border-transparent rounded shadow-sm text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"

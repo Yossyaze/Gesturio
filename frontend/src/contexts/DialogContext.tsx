@@ -24,15 +24,56 @@ interface DialogState {
   resolve: (value: DialogResult) => void;
 }
 
+export type ToastType = "success" | "info" | "error";
+
+interface ToastState {
+  id: string;
+  message: string;
+  type: ToastType;
+}
+
 export const DialogContext = React.createContext<{
   confirm: (msg: string) => Promise<boolean>;
   prompt: (msg: string, defaultVal?: string) => Promise<string | null>;
   alert: (msg: string) => Promise<void>;
   confirmUnsaved: (options: UnsavedConfirmOptions) => Promise<"save" | "discard" | "cancel">;
+  toast: (msg: string, type?: ToastType) => void;
 } | null>(null);
 
 export const DialogProvider = ({ children }: { children: ReactNode }) => {
   const [dialogs, setDialogs] = useState<DialogState[]>([]);
+  const [toasts, setToasts] = useState<ToastState[]>([]);
+  const toastTimersRef = useRef<Map<string, number>>(new Map());
+
+  const dismissToast = useCallback((id: string) => {
+    const timer = toastTimersRef.current.get(id);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      toastTimersRef.current.delete(id);
+    }
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  // 画面右下に一定時間表示して自動で消えるトースト通知を表示する
+  const toast = useCallback(
+    (message: string, type: ToastType = "success") => {
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      setToasts((prev) => [...prev.slice(-3), { id, message, type }]);
+      const timer = window.setTimeout(() => {
+        dismissToast(id);
+      }, 2500);
+      toastTimersRef.current.set(id, timer);
+    },
+    [dismissToast],
+  );
+
+  useEffect(() => {
+    const timers = toastTimersRef.current;
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+      timers.clear();
+    };
+  }, []);
 
   const confirm = useCallback((message: string) => {
     return new Promise<boolean>((resolve) => {
@@ -100,7 +141,9 @@ export const DialogProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <DialogContext.Provider value={{ confirm, prompt, alert, confirmUnsaved }}>
+    <DialogContext.Provider
+      value={{ confirm, prompt, alert, confirmUnsaved, toast }}
+    >
       {children}
       {dialogs.map((dialog) => (
         <DialogModal
@@ -109,6 +152,31 @@ export const DialogProvider = ({ children }: { children: ReactNode }) => {
           onClose={() => closeDialog(dialog.id)}
         />
       ))}
+      {toasts.length > 0 && (
+        <div
+          aria-live="polite"
+          className="fixed bottom-4 right-4 z-[99998] flex flex-col gap-2 pointer-events-none max-w-xs"
+        >
+          {toasts.map((item) => {
+            const colorClass =
+              item.type === "error"
+                ? "bg-red-600 text-white border-red-700"
+                : item.type === "info"
+                  ? "bg-slate-800 text-white border-slate-700"
+                  : "bg-emerald-600 text-white border-emerald-700";
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => dismissToast(item.id)}
+                className={`pointer-events-auto text-left px-3.5 py-2 rounded-lg shadow-lg border text-xs font-medium transition-all animate-in fade-in slide-in-from-bottom-2 duration-150 ${colorClass}`}
+              >
+                {item.message}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </DialogContext.Provider>
   );
 };

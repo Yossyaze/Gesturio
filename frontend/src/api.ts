@@ -368,14 +368,14 @@ export const createProject = async (
   };
 };
 
-/** プロジェクトを上書き保存 */
+/** プロジェクトを上書き保存（保存先に未登録の場合は新規作成として保存） */
 export const updateProject = async (
   id: string,
   data: ProjectData,
 ): Promise<ProjectData> => {
   if (auth.currentUser) {
     const docRef = doc(db, "users", auth.currentUser.uid, "projects", id);
-    await updateDoc(
+    await setDoc(
       docRef,
       serializeForFirestore({
         name: data.name,
@@ -383,6 +383,7 @@ export const updateProject = async (
         settings: data.settings,
         updatedAt: Date.now(),
       }),
+      { merge: true },
     );
     return {
       id,
@@ -393,22 +394,6 @@ export const updateProject = async (
   }
 
   const dbInstance = await openProjDb();
-  // 存在確認
-  const existing = await new Promise<ProjectRecord | undefined>(
-    (resolve, reject) => {
-      const tx = dbInstance.transaction(PROJ_STORE_NAME, "readonly");
-      const store = tx.objectStore(PROJ_STORE_NAME);
-      const request = store.get(id);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    },
-  );
-
-  if (!existing) {
-    dbInstance.close();
-    throw new Error("プロジェクトが見つかりません");
-  }
-
   const record: ProjectRecord = {
     id,
     name: data.name,
@@ -417,14 +402,17 @@ export const updateProject = async (
     updatedAt: Date.now(),
   };
 
-  await new Promise<void>((resolve, reject) => {
-    const tx = dbInstance.transaction(PROJ_STORE_NAME, "readwrite");
-    const store = tx.objectStore(PROJ_STORE_NAME);
-    store.put(record);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
-  dbInstance.close();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = dbInstance.transaction(PROJ_STORE_NAME, "readwrite");
+      const store = tx.objectStore(PROJ_STORE_NAME);
+      store.put(record);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } finally {
+    dbInstance.close();
+  }
 
   return {
     id,

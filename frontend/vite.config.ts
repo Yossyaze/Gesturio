@@ -40,7 +40,7 @@ export default defineConfig({
     tailwindcss(),
     nodePolyfills({
       // bplist-parser が Buffer を使用するため必要
-      include: ["buffer", "events", "stream", "util", "process", "fs"],
+      include: ["buffer"],
     }),
   ],
 });
