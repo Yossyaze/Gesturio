@@ -611,8 +611,12 @@ export async function fetchBackgrounds(): Promise<BackgroundImage[]> {
 }
 
 /** 背景画像をアップロード（IndexedDB に Blob として保存） */
-export async function uploadBackground(file: File): Promise<BackgroundImage> {
+export async function uploadBackground(
+  file: File,
+  groupName?: string | null,
+): Promise<BackgroundImage> {
   const id = crypto.randomUUID();
+  const normalizedGroupName = groupName?.trim() || null;
 
   const blob = new Blob([await file.arrayBuffer()], { type: file.type });
 
@@ -620,7 +624,7 @@ export async function uploadBackground(file: File): Promise<BackgroundImage> {
     id,
     blob,
     createdAt: Date.now(),
-    groupName: null,
+    groupName: normalizedGroupName,
   };
 
   const dbInstance = await openBgDb();
@@ -633,7 +637,11 @@ export async function uploadBackground(file: File): Promise<BackgroundImage> {
   });
   dbInstance.close();
 
-  return { id, url: URL.createObjectURL(blob), groupName: null };
+  return {
+    id,
+    url: URL.createObjectURL(blob),
+    groupName: normalizedGroupName,
+  };
 }
 
 /** 背景画像のグループ名を更新 */

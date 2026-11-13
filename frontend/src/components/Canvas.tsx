@@ -18,6 +18,7 @@ interface CanvasProps {
   width?: number;
   height?: number;
   backgroundImage?: string | null;
+  backgroundOpacity?: number;
   showGrid?: boolean;
   showPoints?: boolean;
   style?: React.CSSProperties;
@@ -58,6 +59,7 @@ const Canvas: React.FC<CanvasProps> = ({
   width = 1180,
   height = 820,
   backgroundImage,
+  backgroundOpacity = 1.0,
   showGrid = false,
   showPoints = true,
   style,
@@ -139,6 +141,18 @@ const Canvas: React.FC<CanvasProps> = ({
       ctx.strokeRect(0, 0, width, height);
     };
 
+    const drawBackgroundImageWithOpacity = (img: HTMLImageElement) => {
+      const opacity = Math.max(0.1, Math.min(1, backgroundOpacity));
+      if (opacity < 1) {
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, width, height);
+      }
+      ctx.save();
+      ctx.globalAlpha = opacity;
+      ctx.drawImage(img, 0, 0, width, height);
+      ctx.restore();
+    };
+
     const render = () => {
       ctx.clearRect(0, 0, width, height);
 
@@ -147,7 +161,7 @@ const Canvas: React.FC<CanvasProps> = ({
         const cached = bgImageCacheRef.current;
         if (cached && cached.src === backgroundImage) {
           if (cached.status === "loaded") {
-            ctx.drawImage(cached.img, 0, 0, width, height);
+            drawBackgroundImageWithOpacity(cached.img);
             drawGridAndPaths();
             return;
           }
@@ -174,7 +188,7 @@ const Canvas: React.FC<CanvasProps> = ({
           cacheEntry.status = "loaded";
           if (bgImageCacheRef.current === cacheEntry) {
             ctx.clearRect(0, 0, width, height);
-            ctx.drawImage(img, 0, 0, width, height);
+            drawBackgroundImageWithOpacity(img);
             drawGridAndPaths();
           }
         };
@@ -195,7 +209,7 @@ const Canvas: React.FC<CanvasProps> = ({
 
         if (img.complete && img.naturalHeight !== 0) {
           cacheEntry.status = "loaded";
-          ctx.drawImage(img, 0, 0, width, height);
+          drawBackgroundImageWithOpacity(img);
           drawGridAndPaths();
           img.onload = null;
           img.onerror = null;
@@ -494,6 +508,7 @@ const Canvas: React.FC<CanvasProps> = ({
     width,
     height,
     backgroundImage,
+    backgroundOpacity,
     showGrid,
     showPoints,
     markerPosition,

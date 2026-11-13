@@ -9,6 +9,7 @@ import Sidebar from "./components/Sidebar";
 import ProjectMenu from "./components/ProjectMenu";
 import AuthStatus from "./components/AuthStatus";
 import ShortcutHelpModal from "./components/ShortcutHelpModal";
+import BackgroundLibraryModal from "./components/BackgroundLibraryModal";
 import { useAuth } from "./contexts/AuthContext";
 import { useDialog } from "./contexts/DialogContext";
 import {
@@ -471,6 +472,10 @@ function App() {
   }, [showDeviceFrame]);
 
   const [backgroundImage, setBackgroundImage] = useState<string | null>(null);
+  const [backgroundOpacity, setBackgroundOpacity] = useState<number>(() =>
+    loadState<number>("backgroundOpacity", 1.0)
+  );
+  const [isBackgroundLibraryOpen, setIsBackgroundLibraryOpen] = useState(false);
 
   const [backgroundsList, setBackgroundsList] = useState<BackgroundImage[]>([]);
   const [backgroundFolders, setBackgroundFolders] = useState<string[]>(() =>
@@ -655,6 +660,10 @@ function App() {
   useEffect(() => {
     saveState("showPoints", showPoints);
   }, [showPoints]);
+
+  useEffect(() => {
+    saveState("backgroundOpacity", backgroundOpacity);
+  }, [backgroundOpacity]);
   useEffect(() => {
     saveState("isLeftSidebarOpen", isLeftSidebarOpen);
   }, [isLeftSidebarOpen]);
@@ -2069,11 +2078,23 @@ function App() {
     }
   };
 
-  const handleBackgroundImageUpload = async (files: FileList) => {
+  const handleBackgroundImageUpload = async (
+    files: FileList,
+    groupName?: string | null,
+  ) => {
     try {
+      const normalizedGroupName = groupName?.trim() || null;
+      if (normalizedGroupName) {
+        setBackgroundFolders((prev) =>
+          prev.includes(normalizedGroupName)
+            ? prev
+            : [...prev, normalizedGroupName],
+        );
+      }
+
       const fileArray = Array.from(files);
       for (const file of fileArray) {
-        const bgImage = await uploadBackground(file);
+        const bgImage = await uploadBackground(file, normalizedGroupName);
         // IndexedDB 版では url が Object URL
         setBackgroundImage(bgImage.url);
 
@@ -2835,6 +2856,7 @@ function App() {
                   width={selectedDevice.width}
                   height={selectedDevice.height}
                   backgroundImage={backgroundImage}
+                  backgroundOpacity={backgroundOpacity}
                   paths={canvasPaths}
                   showGrid={showGrid}
                   showPoints={showPoints}
@@ -3027,13 +3049,14 @@ function App() {
             onBackgroundImageSelect={(url) => setBackgroundImage(url)}
             selectedBackgroundImageUrl={backgroundImage}
             onClearBackgroundImage={handleClearBackgroundImage}
+            backgroundOpacity={backgroundOpacity}
+            onBackgroundOpacityChange={setBackgroundOpacity}
+            onOpenBackgroundLibrary={() => setIsBackgroundLibraryOpen(true)}
             backgroundsList={backgroundsList}
             backgroundFolders={backgroundFolders}
             onDeleteBackground={handleDeleteBackground}
             onUpdateBackgroundGroup={handleUpdateBackgroundGroup}
             onCreateBackgroundFolder={handleCreateBackgroundFolder}
-            onRenameBackgroundFolder={handleRenameBackgroundFolder}
-            onDeleteBackgroundFolder={handleDeleteBackgroundFolder}
             showGrid={showGrid}
             onToggleGrid={() => setShowGrid(!showGrid)}
             showPoints={showPoints}
@@ -3133,6 +3156,22 @@ function App() {
           </button>
         )}
       </div>
+      <BackgroundLibraryModal
+        isOpen={isBackgroundLibraryOpen}
+        onClose={() => setIsBackgroundLibraryOpen(false)}
+        backgroundsList={backgroundsList}
+        backgroundFolders={backgroundFolders}
+        selectedBackgroundImageUrl={backgroundImage}
+        onBackgroundImageUpload={handleBackgroundImageUpload}
+        onBackgroundImageSelect={(url) => setBackgroundImage(url)}
+        onClearBackgroundImage={handleClearBackgroundImage}
+        onDeleteBackground={handleDeleteBackground}
+        onUpdateBackgroundGroup={handleUpdateBackgroundGroup}
+        onCreateBackgroundFolder={handleCreateBackgroundFolder}
+        onRenameBackgroundFolder={handleRenameBackgroundFolder}
+        onDeleteBackgroundFolder={handleDeleteBackgroundFolder}
+      />
+
       <ShortcutHelpModal
         isOpen={isHelpOpen}
         onClose={() => setIsHelpOpen(false)}

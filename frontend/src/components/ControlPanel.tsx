@@ -5,10 +5,32 @@ import React, {
   useCallback,
   useMemo,
 } from "react";
-import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  ChevronUp,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Smartphone,
+  Image as ImageIcon,
+  Star,
+  FileOutput,
+  FolderOpen,
+  FolderPlus,
+  Upload,
+  Trash2,
+  Edit2,
+  Check,
+  X,
+  Plus,
+} from "lucide-react";
 import { type BackgroundImage } from "../api";
 import { type DeviceModel } from "../constants/devices";
 import { useDialog } from "../contexts/DialogContext";
+import {
+  buildBackgroundFolderItems,
+  filterBackgroundsByFolder,
+  getFolderGroupNameFromKey,
+} from "../utils/backgroundFolders";
 
 interface ControlPanelProps {
   onNudge: (x: number, y: number, saveHistory?: boolean) => void;
@@ -18,17 +40,21 @@ interface ControlPanelProps {
   onSelectModel: (id: string) => void;
   orientation: "portrait" | "landscape";
   onSelectOrientation: (orientation: "portrait" | "landscape") => void;
-  onBackgroundImageUpload: (files: FileList) => void;
+  onBackgroundImageUpload: (
+    files: FileList,
+    groupName?: string | null,
+  ) => void;
   onBackgroundImageSelect?: (url: string) => void;
   selectedBackgroundImageUrl?: string | null;
   onClearBackgroundImage: () => void;
+  backgroundOpacity?: number;
+  onBackgroundOpacityChange?: (opacity: number) => void;
+  onOpenBackgroundLibrary?: () => void;
   backgroundsList?: BackgroundImage[];
   backgroundFolders?: string[];
   onDeleteBackground?: (id: string) => void;
   onUpdateBackgroundGroup?: (id: string, groupName: string | null) => void;
   onCreateBackgroundFolder?: (folderName: string) => void;
-  onRenameBackgroundFolder?: (currentName: string, nextName: string) => void;
-  onDeleteBackgroundFolder?: (folderName: string) => void;
   showGrid: boolean;
   onToggleGrid: (show: boolean) => void;
   showPoints: boolean;
@@ -162,13 +188,14 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   onBackgroundImageSelect,
   selectedBackgroundImageUrl,
   onClearBackgroundImage,
+  backgroundOpacity = 1.0,
+  onBackgroundOpacityChange,
+  onOpenBackgroundLibrary,
   backgroundsList = [],
   backgroundFolders = [],
   onDeleteBackground,
   onUpdateBackgroundGroup,
   onCreateBackgroundFolder,
-  onRenameBackgroundFolder,
-  onDeleteBackgroundFolder,
   showGrid,
   onToggleGrid,
   showPoints,
@@ -260,6 +287,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     "action",
   );
   const [selectedFolderKey, setSelectedFolderKey] = useState<string>("__all__");
+  const [isFavoritesOpen, setIsFavoritesOpen] = useState<boolean>(false);
+  const [isBgDragOver, setIsBgDragOver] = useState<boolean>(false);
 
   const stopPress = useCallback(() => {
     if (pressTimerRef.current !== null)
@@ -321,61 +350,10 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   }, [stopNudgePress]);
   // ------------------------------------
 
-  const folderItems = useMemo(() => {
-    const normalizedFolders = Array.from(
-      new Set(
-        backgroundFolders
-          .map((name) => name.trim())
-          .filter((name) => name.length > 0),
-      ),
-    );
-
-    const countMap = new Map<string, number>();
-    backgroundsList.forEach((bg) => {
-      const key = bg.groupName?.trim() || "";
-      countMap.set(key, (countMap.get(key) || 0) + 1);
-    });
-
-    const items: { key: string; name: string | null; label: string; count: number }[] = [
-      {
-        key: "__all__",
-        name: null,
-        label: "すべて",
-        count: backgroundsList.length,
-      },
-      {
-        key: "__ungrouped__",
-        name: null,
-        label: "未分類",
-        count: countMap.get("") || 0,
-      },
-    ];
-
-    normalizedFolders.forEach((name) => {
-      items.push({
-        key: `folder:${name}`,
-        name,
-        label: name,
-        count: countMap.get(name) || 0,
-      });
-    });
-
-    // 画像にだけ存在してフォルダー一覧にない名前を補完
-    Array.from(countMap.keys())
-      .filter((key) => key.length > 0)
-      .forEach((name) => {
-        if (!normalizedFolders.includes(name)) {
-          items.push({
-            key: `folder:${name}`,
-            name,
-            label: name,
-            count: countMap.get(name) || 0,
-          });
-        }
-      });
-
-    return items;
-  }, [backgroundFolders, backgroundsList]);
+  const folderItems = useMemo(
+    () => buildBackgroundFolderItems(backgroundFolders, backgroundsList),
+    [backgroundFolders, backgroundsList],
+  );
 
   // folderItemsが変更され、現在の選択キーが無効になった場合にリセットする（Effectを使わないパターン）
   const [prevFolderItems, setPrevFolderItems] = useState(folderItems);
@@ -386,19 +364,10 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     }
   }
 
-  const visibleBackgrounds = useMemo(() => {
-    if (selectedFolderKey === "__all__") return backgroundsList;
-    if (selectedFolderKey === "__ungrouped__") {
-      return backgroundsList.filter((bg) => !bg.groupName?.trim());
-    }
-    if (selectedFolderKey.startsWith("folder:")) {
-      const folderName = selectedFolderKey.replace("folder:", "");
-      return backgroundsList.filter(
-        (bg) => (bg.groupName?.trim() || "") === folderName,
-      );
-    }
-    return backgroundsList;
-  }, [backgroundsList, selectedFolderKey]);
+  const visibleBackgrounds = useMemo(
+    () => filterBackgroundsByFolder(backgroundsList, selectedFolderKey),
+    [backgroundsList, selectedFolderKey],
+  );
 
   const folderNameOptions = useMemo(
     () =>
@@ -408,13 +377,22 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     [folderItems],
   );
 
-  const selectedFolder = folderItems.find((item) => item.key === selectedFolderKey);
+  const activeUploadGroup = getFolderGroupNameFromKey(selectedFolderKey);
   const selectedBackground = useMemo(() => {
     if (!selectedBackgroundImageUrl) return null;
     return (
       backgroundsList.find((bg) => bg.url === selectedBackgroundImageUrl) || null
     );
   }, [backgroundsList, selectedBackgroundImageUrl]);
+
+  const matchingFavorite = useMemo(
+    () =>
+      favoriteEnvironments.find(
+        (env) =>
+          env.modelId === selectedModelId && env.orientation === orientation,
+      ) || null,
+    [favoriteEnvironments, selectedModelId, orientation],
+  );
 
   return (
     <div className="w-full min-w-0 bg-white flex flex-col h-full min-h-0 font-sans z-20 overflow-hidden">
@@ -440,158 +418,481 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         </button>
       </div>
 
-      <div className="flex-1 min-h-0 min-w-0 overflow-hidden px-4">
+      <div className="flex-1 min-h-0 min-w-0 overflow-hidden">
         {/* Environment Settings Tab */}
-        <div className={activeTab === "environment" ? "h-full overflow-y-auto overflow-x-hidden space-y-6 px-2" : "hidden"}>
-          {/* Device Settings */}
-          <div className="space-y-3">
-            <label className="text-xs font-bold text-gray-400 uppercase tracking-wider block">
-              環境設定
-            </label>
+        <div
+          className={
+            activeTab === "environment"
+              ? "h-full overflow-y-auto overflow-x-hidden px-3 py-3 space-y-3"
+              : "hidden"
+          }
+        >
+          {/* 1. 端末・画面表示カード */}
+          <section className="rounded-lg border border-gray-200 bg-white p-3 space-y-2.5 shadow-2xs">
+            <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+              <Smartphone className="w-3.5 h-3.5 text-blue-600" />
+              <span>端末・画面表示</span>
+            </div>
 
-            {/* お気に入り環境設定 */}
-            <div className="flex flex-col space-y-2 bg-blue-50/50 p-2 rounded-md border border-blue-100">
-              {/* 新規保存ボタン */}
+            <div className="relative">
+              <select
+                className="w-full text-xs border border-gray-300 rounded-md shadow-xs focus:border-blue-500 focus:ring-blue-500 appearance-none py-2 pl-2.5 pr-8 bg-white text-gray-800"
+                value={selectedModelId}
+                onChange={(e) => onSelectModel(e.target.value)}
+              >
+                <optgroup label="iPhone">
+                  {models
+                    .filter((m) => m.category === "iPhone")
+                    .map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                      </option>
+                    ))}
+                </optgroup>
+                <optgroup label="iPad">
+                  {models
+                    .filter((m) => m.category === "iPad")
+                    .map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                      </option>
+                    ))}
+                </optgroup>
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400">
+                <ChevronDown className="h-4 w-4" />
+              </div>
+            </div>
+
+            <div className="flex bg-gray-100 rounded-md p-0.5">
               <button
+                type="button"
+                className={`flex-1 text-xs py-1.5 rounded transition-all ${orientation === "portrait" ? "bg-white shadow-xs font-semibold text-gray-800" : "text-gray-500 hover:text-gray-700"}`}
+                onClick={() => onSelectOrientation("portrait")}
+              >
+                縦画面
+              </button>
+              <button
+                type="button"
+                className={`flex-1 text-xs py-1.5 rounded transition-all ${orientation === "landscape" ? "bg-white shadow-xs font-semibold text-gray-800" : "text-gray-500 hover:text-gray-700"}`}
+                onClick={() => onSelectOrientation("landscape")}
+              >
+                横画面
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() => onToggleGrid(!showGrid)}
+                className={`px-2 py-1.5 rounded-md text-[11px] font-medium border transition-colors ${showGrid ? "bg-blue-50 border-blue-200 text-blue-700" : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100"}`}
+              >
+                グリッド: {showGrid ? "ON" : "OFF"}
+              </button>
+              <button
+                type="button"
+                onClick={() => onTogglePoints(!showPoints)}
+                className={`px-2 py-1.5 rounded-md text-[11px] font-medium border transition-colors ${showPoints ? "bg-blue-50 border-blue-200 text-blue-700" : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100"}`}
+              >
+                開始/終了点: {showPoints ? "ON" : "OFF"}
+              </button>
+            </div>
+          </section>
+
+          {/* 2. 背景画像カード */}
+          <section className="rounded-lg border border-gray-200 bg-white p-3 space-y-2.5 shadow-2xs">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                <ImageIcon className="w-3.5 h-3.5 text-emerald-600" />
+                <span>背景画像</span>
+              </div>
+              {onOpenBackgroundLibrary && (
+                <button
+                  type="button"
+                  onClick={onOpenBackgroundLibrary}
+                  className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700 hover:bg-blue-100 transition-colors"
+                  title="広いウィンドウで画像一覧・フォルダー整理を開く"
+                >
+                  <FolderOpen className="w-3 h-3" />
+                  <span>ライブラリ</span>
+                </button>
+              )}
+            </div>
+
+            {/* ドラッグ＆ドロップ対応アップロード枠 ＆ 適用中プレビュー */}
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsBgDragOver(true);
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault();
+                setIsBgDragOver(false);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsBgDragOver(false);
+                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                  onBackgroundImageUpload(
+                    e.dataTransfer.files,
+                    activeUploadGroup,
+                  );
+                }
+              }}
+              className={`rounded-lg border transition-colors p-2 ${
+                isBgDragOver
+                  ? "border-blue-400 bg-blue-50/70"
+                  : selectedBackgroundImageUrl
+                    ? "border-blue-200 bg-blue-50/30"
+                    : "border-dashed border-gray-300 bg-gray-50/70 hover:border-gray-400"
+              }`}
+            >
+              {selectedBackgroundImageUrl ? (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-11 h-14 rounded bg-slate-100 border border-gray-200 flex items-center justify-center overflow-hidden shrink-0">
+                      <img
+                        src={selectedBackgroundImageUrl}
+                        alt="適用中の背景"
+                        className="max-w-full max-h-full object-contain"
+                      />
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-1">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-blue-700">
+                          <Check className="w-3 h-3" />
+                          背景を適用中
+                        </span>
+                        <button
+                          type="button"
+                          onClick={onClearBackgroundImage}
+                          className="inline-flex items-center gap-0.5 text-[10px] text-gray-500 hover:text-red-600 transition-colors"
+                          title="背景画像を解除"
+                        >
+                          <X className="w-3 h-3" />
+                          <span>解除</span>
+                        </button>
+                      </div>
+                      {selectedBackground && (
+                        <select
+                          value={selectedBackground.groupName?.trim() || ""}
+                          onChange={(e) =>
+                            onUpdateBackgroundGroup?.(
+                              selectedBackground.id,
+                              e.target.value || null,
+                            )
+                          }
+                          className="w-full rounded border border-gray-200 bg-white px-1.5 py-1 text-[10px] text-gray-700 focus:border-blue-400 focus:outline-none"
+                          title="適用中画像の登録先フォルダー"
+                        >
+                          <option value="">未分類</option>
+                          {folderNameOptions.map((name) => (
+                            <option key={name} value={name}>
+                              {name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded border border-dashed border-gray-300 bg-white text-[11px] text-gray-600 hover:border-blue-400 hover:text-blue-600 transition-colors"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>別の画像を追加・ドロップ</span>
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full py-3 flex flex-col items-center justify-center text-center gap-1 text-gray-500 hover:text-blue-600 transition-colors"
+                >
+                  <Upload className="w-5 h-5 text-gray-400" />
+                  <span className="text-xs font-medium">
+                    画像を選択またはドロップ
+                  </span>
+                  <span className="text-[10px] text-gray-400">
+                    追加先: {activeUploadGroup ?? "未分類"}
+                  </span>
+                </button>
+              )}
+              <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                accept="image/*"
+                multiple
+                onChange={(e) => {
+                  if (e.target.files && e.target.files.length > 0) {
+                    onBackgroundImageUpload(e.target.files, activeUploadGroup);
+                    e.target.value = "";
+                  }
+                }}
+              />
+            </div>
+
+            {/* 背景の濃さ（不透明度） */}
+            {onBackgroundOpacityChange && (
+              <div className="pt-0.5">
+                <div className="flex items-center justify-between text-[11px] mb-1">
+                  <span className="text-gray-600 font-medium">
+                    背景の濃さ（不透明度）
+                  </span>
+                  <span className="font-mono text-gray-500">
+                    {Math.round(backgroundOpacity * 100)}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0.15"
+                  max="1"
+                  step="0.05"
+                  value={backgroundOpacity}
+                  onChange={(e) =>
+                    onBackgroundOpacityChange(parseFloat(e.target.value))
+                  }
+                  className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                />
+              </div>
+            )}
+
+            {/* フォルダー切り替え ＋ 見切れなしの2列プレビュー */}
+            <div className="pt-1 border-t border-gray-100 space-y-2">
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={selectedFolderKey}
+                  onChange={(e) => setSelectedFolderKey(e.target.value)}
+                  className="flex-1 min-w-0 rounded border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] text-gray-700 focus:border-blue-400 focus:bg-white focus:outline-none"
+                  title="表示する背景フォルダーを絞り込む"
+                >
+                  {folderItems.map((folder) => (
+                    <option key={folder.key} value={folder.key}>
+                      {folder.label} ({folder.count})
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!onCreateBackgroundFolder) return;
+                    const name = await prompt(
+                      "新しいフォルダー名を入力してください:",
+                    );
+                    if (name && name.trim()) {
+                      onCreateBackgroundFolder(name.trim());
+                      setSelectedFolderKey(`folder:${name.trim()}`);
+                    }
+                  }}
+                  className="p-1.5 rounded border border-gray-200 bg-white text-gray-500 hover:border-blue-300 hover:text-blue-600 transition-colors shrink-0"
+                  title="フォルダーを新規作成"
+                >
+                  <FolderPlus className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {visibleBackgrounds.length > 0 ? (
+                <div className="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto pr-0.5">
+                  {visibleBackgrounds.map((bg) => {
+                    const isActive = selectedBackgroundImageUrl === bg.url;
+                    return (
+                      <div
+                        key={bg.id}
+                        className={`relative group cursor-pointer rounded-lg overflow-hidden border transition-all bg-slate-100 ${
+                          isActive
+                            ? "border-blue-500 ring-2 ring-blue-200"
+                            : "border-gray-200 hover:border-blue-400"
+                        }`}
+                        onClick={() => onBackgroundImageSelect?.(bg.url)}
+                      >
+                        <div className="aspect-[4/5] p-1 flex items-center justify-center">
+                          <img
+                            src={bg.url}
+                            alt="背景サムネイル"
+                            className="max-w-full max-h-full object-contain rounded-xs"
+                          />
+                        </div>
+                        {isActive && (
+                          <span className="absolute left-1 top-1 rounded bg-blue-600 px-1.5 py-0.5 text-[9px] font-bold text-white shadow">
+                            適用中
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (!onDeleteBackground) return;
+                            const confirmed =
+                              await confirm("この背景画像を削除しますか？");
+                            if (confirmed) {
+                              onDeleteBackground(bg.id);
+                            }
+                          }}
+                          className="absolute top-1 right-1 p-1 rounded bg-white/90 text-gray-500 hover:bg-red-500 hover:text-white opacity-70 group-hover:opacity-100 transition-all shadow-xs"
+                          title="画像を削除"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded border border-dashed border-gray-200 bg-gray-50 px-3 py-4 text-center text-[10px] text-gray-400">
+                  このフォルダーに画像はありません
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* 3. お気に入り環境カード（折りたたみ対応） */}
+          <section className="rounded-lg border border-gray-200 bg-white overflow-hidden shadow-2xs">
+            <div className="p-3 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setIsFavoritesOpen((prev) => !prev)}
+                className="flex-1 flex items-center gap-1.5 text-left min-w-0"
+              >
+                <Star className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider truncate">
+                  お気に入り ({favoriteEnvironments.length})
+                </span>
+                {matchingFavorite && (
+                  <span className="text-[9px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded-full truncate max-w-[80px]">
+                    {matchingFavorite.name}
+                  </span>
+                )}
+                {isFavoritesOpen ? (
+                  <ChevronUp className="w-3.5 h-3.5 text-gray-400 ml-auto shrink-0" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-gray-400 ml-auto shrink-0" />
+                )}
+              </button>
+              <button
+                type="button"
                 onClick={async () => {
                   const name = await prompt(
                     "現在の環境設定（端末・縦横）に名前を付けて保存します。",
                   );
                   if (name && name.trim() && onSaveEnvironment) {
                     onSaveEnvironment(name.trim());
+                    setIsFavoritesOpen(true);
                   }
                 }}
-                className="w-full flex items-center justify-center px-2 py-1.5 bg-blue-500 text-white rounded text-xs font-medium hover:bg-blue-600 transition"
-                title="現在の設定をお気に入りに追加"
+                className="inline-flex items-center gap-0.5 px-2 py-1 rounded border border-blue-200 bg-blue-50 text-[10px] font-semibold text-blue-700 hover:bg-blue-100 transition-colors shrink-0"
+                title="現在の設定をお気に入りに保存"
               >
-                🌟 現在の設定をお気に入りに保存
+                <Plus className="w-3 h-3" />
+                <span>保存</span>
               </button>
-
-              {/* お気に入りリスト */}
-              {favoriteEnvironments.length > 0 ? (
-                <div className="space-y-1 max-h-40 overflow-y-auto">
-                  {favoriteEnvironments.map((env) => (
-                    <div
-                      key={env.id}
-                      className="flex items-center justify-between bg-white rounded border border-gray-200 px-2 py-1.5 group hover:border-blue-300 transition-colors"
-                    >
-                      {/* 名前と情報 */}
-                      <button
-                        className="flex-1 text-left text-xs text-gray-700 hover:text-blue-600 truncate"
-                        onClick={() =>
-                          onLoadEnvironment && onLoadEnvironment(env)
-                        }
-                        title={`読み込む: ${env.name}`}
-                      >
-                        <span className="font-medium">{env.name}</span>
-                        <span className="text-[9px] text-gray-400 ml-1">
-                          ({env.orientation === "portrait" ? "縦" : "横"})
-                        </span>
-                      </button>
-                      {/* 操作ボタン群 */}
-                      <div className="flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-1">
-                        {/* 上書き保存 */}
-                        <button
-                          onClick={() => {
-                            if (onOverwriteEnvironment) {
-                              onOverwriteEnvironment(env.id);
-                            }
-                          }}
-                          className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                          title="現在の設定で上書き保存"
-                        >
-                          <svg
-                            className="w-3 h-3"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
-                            />
-                          </svg>
-                        </button>
-                        {/* リネーム */}
-                        <button
-                          onClick={async () => {
-                            const newName = await prompt(
-                              "新しい名前を入力してください:",
-                              env.name,
-                            );
-                            if (
-                              newName &&
-                              newName.trim() &&
-                              newName.trim() !== env.name &&
-                              onRenameEnvironment
-                            ) {
-                              onRenameEnvironment(env.id, newName.trim());
-                            }
-                          }}
-                          className="p-1 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded transition-colors"
-                          title="名前を変更"
-                        >
-                          <svg
-                            className="w-3 h-3"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                            />
-                          </svg>
-                        </button>
-                        {/* 削除 */}
-                        <button
-                          onClick={async () => {
-                            const confirmed = await confirm(
-                              `「${env.name}」を削除しますか？`,
-                            );
-                            if (confirmed && onDeleteEnvironment) {
-                              onDeleteEnvironment(env.id);
-                            }
-                          }}
-                          className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                          title="削除"
-                        >
-                          <svg
-                            className="w-3 h-3"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                            />
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-[10px] text-gray-400 text-center py-1">
-                  まだお気に入りがありません
-                </p>
-              )}
             </div>
 
-            {/* 書き出し拡張子 */}
-            <div className="flex items-center space-x-2 bg-gray-50 p-2 rounded-md border border-gray-200">
-              <label className="text-[10px] text-gray-500 font-medium whitespace-nowrap">
+            {isFavoritesOpen && (
+              <div className="px-3 pb-3 pt-1 border-t border-gray-100">
+                {favoriteEnvironments.length > 0 ? (
+                  <div className="space-y-1 max-h-44 overflow-y-auto">
+                    {favoriteEnvironments.map((env) => {
+                      const isCurrentEnv =
+                        env.modelId === selectedModelId &&
+                        env.orientation === orientation;
+                      return (
+                        <div
+                          key={env.id}
+                          className={`flex items-center justify-between rounded border px-2 py-1.5 group transition-colors ${
+                            isCurrentEnv
+                              ? "bg-blue-50/70 border-blue-300"
+                              : "bg-gray-50/60 border-gray-200 hover:border-blue-300 hover:bg-white"
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            className="flex-1 text-left text-xs text-gray-700 hover:text-blue-600 truncate flex items-center gap-1"
+                            onClick={() => onLoadEnvironment?.(env)}
+                            title={`読み込む: ${env.name}`}
+                          >
+                            {isCurrentEnv && (
+                              <Check className="w-3 h-3 text-blue-600 shrink-0" />
+                            )}
+                            <span className="font-medium truncate">
+                              {env.name}
+                            </span>
+                            <span className="text-[9px] text-gray-400 shrink-0">
+                              ({env.orientation === "portrait" ? "縦" : "横"})
+                            </span>
+                          </button>
+                          <div className="flex items-center space-x-0.5 opacity-60 group-hover:opacity-100 transition-opacity shrink-0 ml-1">
+                            <button
+                              type="button"
+                              onClick={() => onOverwriteEnvironment?.(env.id)}
+                              className="p-1 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                              title="現在の設定で上書き保存"
+                            >
+                              <Upload className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const newName = await prompt(
+                                  "新しい名前を入力してください:",
+                                  env.name,
+                                );
+                                if (
+                                  newName &&
+                                  newName.trim() &&
+                                  newName.trim() !== env.name &&
+                                  onRenameEnvironment
+                                ) {
+                                  onRenameEnvironment(env.id, newName.trim());
+                                }
+                              }}
+                              className="p-1 text-gray-500 hover:text-amber-600 hover:bg-amber-50 rounded transition-colors"
+                              title="名前を変更"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const confirmed = await confirm(
+                                  `「${env.name}」を削除しますか？`,
+                                );
+                                if (confirmed && onDeleteEnvironment) {
+                                  onDeleteEnvironment(env.id);
+                                }
+                              }}
+                              className="p-1 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                              title="削除"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-gray-400 text-center py-2">
+                    まだお気に入りがありません
+                  </p>
+                )}
+              </div>
+            )}
+          </section>
+
+          {/* 4. 書き出し設定カード */}
+          <section className="rounded-lg border border-gray-200 bg-white p-3 space-y-2 shadow-2xs">
+            <div className="flex items-center gap-1.5 text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+              <FileOutput className="w-3.5 h-3.5 text-gray-500" />
+              <span>書き出し設定</span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <label className="text-[11px] text-gray-600 font-medium whitespace-nowrap">
                 拡張子
               </label>
               <select
-                className="flex-1 text-xs border-gray-300 rounded shadow-sm focus:border-blue-500 py-1 pl-2 pr-6 bg-white"
+                className="flex-1 min-w-0 text-xs border border-gray-300 rounded shadow-2xs focus:border-blue-500 py-1.5 pl-2 pr-6 bg-white"
                 value={exportExtension}
                 onChange={(e) => onExportExtensionChange?.(e.target.value)}
               >
@@ -603,304 +904,17 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                 </option>
               </select>
             </div>
-
-            <div className="space-y-2">
-              <div className="relative">
-                <select
-                  className="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 appearance-none py-2 pl-3 pr-8 bg-white"
-                  value={selectedModelId}
-                  onChange={(e) => onSelectModel(e.target.value)}
-                >
-                  <optgroup label="iPhone">
-                    {models
-                      .filter((m) => m.category === "iPhone")
-                      .map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name}
-                        </option>
-                      ))}
-                  </optgroup>
-                  <optgroup label="iPad">
-                    {models
-                      .filter((m) => m.category === "iPad")
-                      .map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name}
-                        </option>
-                      ))}
-                  </optgroup>
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
-                  <svg
-                    className="h-4 w-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 9l-7 7-7-7"
-                    />
-                  </svg>
-                </div>
-              </div>
-
-              <div className="flex space-x-2">
-                <div className="flex-1 flex bg-gray-100 rounded-md p-0.5">
-                  <button
-                    className={`flex-1 text-xs py-1.5 rounded transition-all ${orientation === "portrait" ? "bg-white shadow-sm font-medium text-gray-800" : "text-gray-500 hover:text-gray-700"}`}
-                    onClick={() => onSelectOrientation("portrait")}
-                  >
-                    縦
-                  </button>
-                  <button
-                    className={`flex-1 text-xs py-1.5 rounded transition-all ${orientation === "landscape" ? "bg-white shadow-sm font-medium text-gray-800" : "text-gray-500 hover:text-gray-700"}`}
-                    onClick={() => onSelectOrientation("landscape")}
-                  >
-                    横
-                  </button>
-                </div>
-                <div className="flex flex-col space-y-1">
-                  <button
-                    onClick={() => onToggleGrid(!showGrid)}
-                    className={`w-full px-2 py-1.5 rounded-md text-[10px] font-medium border transition-colors ${showGrid ? "bg-blue-50 border-blue-200 text-blue-700" : "bg-white border-gray-300 text-gray-600"}`}
-                  >
-                    グリッド
-                  </button>
-                  <button
-                    onClick={() => onTogglePoints(!showPoints)}
-                    className={`w-full px-2 py-1.5 rounded-md text-[10px] font-medium border transition-colors ${showPoints ? "bg-blue-50 border-blue-200 text-blue-700" : "bg-white border-gray-300 text-gray-600"}`}
-                  >
-                    開始/終了点(全体)
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full flex items-center justify-center px-3 py-2 border border-dashed border-gray-300 rounded-md text-xs text-gray-600 hover:bg-gray-50 hover:border-gray-400 transition-colors group"
-                >
-                  <svg
-                    className="h-4 w-4 mr-1.5 text-gray-400 group-hover:text-gray-500"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-                    />
-                  </svg>
-                  背景画像を設定
-                </button>
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  className="hidden"
-                  accept="image/*"
-                  multiple
-                  onChange={(e) => {
-                    if (e.target.files && e.target.files.length > 0) {
-                      onBackgroundImageUpload(e.target.files);
-                      e.target.value = "";
-                    }
-                  }}
-                />
-                <button
-                  onClick={onClearBackgroundImage}
-                  className="text-[10px] text-gray-400 hover:text-red-500 hover:underline w-full text-center mt-1"
-                >
-                  背景画像をクリア
-                </button>
-              </div>
-
-              {/* Background Folder Gallery */}
-              <div className="mt-2 text-xs">
-                <div className="flex justify-between items-center mb-1.5">
-                  <span className="text-gray-500 font-medium">背景フォルダー</span>
-                  <button
-                    onClick={async () => {
-                      if (!onCreateBackgroundFolder) return;
-                      const name = await prompt("新しいフォルダー名を入力してください:");
-                      if (name && name.trim()) {
-                        onCreateBackgroundFolder(name.trim());
-                        setSelectedFolderKey(`folder:${name.trim()}`);
-                      }
-                    }}
-                    className="rounded border border-gray-200 px-1.5 py-0.5 text-[10px] text-gray-600 hover:border-blue-300 hover:text-blue-600"
-                    title="フォルダーを作成"
-                  >
-                    + フォルダー
-                  </button>
-                </div>
-
-                <div className="rounded border border-gray-200 bg-gray-50 p-1.5">
-                  <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
-                    {folderItems.map((folder) => (
-                      <button
-                        key={folder.key}
-                        onClick={() => setSelectedFolderKey(folder.key)}
-                        className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] transition-colors border ${
-                          selectedFolderKey === folder.key
-                            ? "bg-blue-600 text-white border-blue-600"
-                            : "bg-white text-gray-700 border-gray-200 hover:border-blue-300"
-                        }`}
-                      >
-                        <span className="max-w-[90px] truncate">{folder.label}</span>
-                        <span className="opacity-80">{folder.count}</span>
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="mt-2 flex items-center justify-between gap-2">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
-                      表示中: {selectedFolder?.label || "すべて"}
-                    </span>
-                    {selectedFolder?.name && (
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={async () => {
-                            if (!onRenameBackgroundFolder || !selectedFolder.name)
-                              return;
-                            const name = await prompt(
-                              "新しいフォルダー名を入力してください:",
-                              selectedFolder.name,
-                            );
-                            if (!name || !name.trim()) return;
-                            await onRenameBackgroundFolder(
-                              selectedFolder.name,
-                              name.trim(),
-                            );
-                            setSelectedFolderKey(`folder:${name.trim()}`);
-                          }}
-                          className="rounded border border-gray-200 px-1.5 py-0.5 text-[10px] text-gray-600 hover:border-amber-300 hover:text-amber-600"
-                        >
-                          名前変更
-                        </button>
-                        <button
-                          onClick={async () => {
-                            if (!onDeleteBackgroundFolder || !selectedFolder.name)
-                              return;
-                            const confirmed = await confirm(
-                              `フォルダー「${selectedFolder.name}」を削除しますか？\n画像は未分類に移動されます。`,
-                            );
-                            if (!confirmed) return;
-                            await onDeleteBackgroundFolder(selectedFolder.name);
-                            setSelectedFolderKey("__ungrouped__");
-                          }}
-                          className="rounded border border-gray-200 px-1.5 py-0.5 text-[10px] text-gray-600 hover:border-red-300 hover:text-red-600"
-                        >
-                          削除
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="mt-2 rounded border border-gray-200 bg-white p-2">
-                  <div className="text-[10px] text-gray-400 mb-1">選択中画像の登録先フォルダー</div>
-                  <select
-                    value={selectedBackground?.groupName?.trim() || ""}
-                    onChange={(e) =>
-                      selectedBackground &&
-                      onUpdateBackgroundGroup?.(
-                        selectedBackground.id,
-                        e.target.value || null,
-                      )
-                    }
-                    disabled={!selectedBackground}
-                    className="w-full rounded border border-gray-200 bg-gray-50 px-2 py-1 text-[11px] text-gray-700 focus:border-blue-400 focus:bg-white focus:outline-none disabled:opacity-50"
-                    title={
-                      selectedBackground
-                        ? "選択中画像のフォルダーを変更"
-                        : "先に画像を選択してください"
-                    }
-                  >
-                    <option value="">未分類</option>
-                    {folderNameOptions.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {visibleBackgrounds.length > 0 ? (
-                  <div className="mt-2 grid grid-cols-3 gap-2">
-                    {visibleBackgrounds.map((bg) => (
-                      <div
-                        key={bg.id}
-                        className={`relative group cursor-pointer rounded overflow-hidden border transition-colors bg-white ${
-                          selectedBackgroundImageUrl === bg.url
-                            ? "border-blue-500 ring-2 ring-blue-200"
-                            : "border-gray-200 hover:border-blue-400 hover:shadow-sm"
-                        }`}
-                        onClick={() =>
-                          onBackgroundImageSelect && onBackgroundImageSelect(bg.url)
-                        }
-                      >
-                        <div className="aspect-square">
-                          <img
-                            src={bg.url}
-                            alt="Background Thumbnail"
-                            className="object-cover w-full h-full"
-                          />
-                        </div>
-                        {selectedBackgroundImageUrl === bg.url && (
-                          <span className="absolute left-1 top-1 rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow">
-                            選択中
-                          </span>
-                        )}
-                        <button
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            if (onDeleteBackground) {
-                              const confirmed = await confirm(
-                                "この背景画像を削除しますか？",
-                              );
-                              if (confirmed) {
-                                onDeleteBackground(bg.id);
-                              }
-                            }
-                          }}
-                          className="absolute top-0 right-0 p-0.5 bg-red-500 text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                          title="削除"
-                        >
-                          <svg
-                            className="w-3 h-3"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M6 18L18 6M6 6l12 12"
-                            />
-                          </svg>
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="mt-2 rounded border border-dashed border-gray-200 bg-gray-50 px-3 py-6 text-center text-[10px] text-gray-400">
-                    このフォルダーに背景画像はありません
-                  </div>
-                )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>{" "}
+          </section>
+        </div>
         {/* End Environment Settings Tab */}
         {/* Action Settings Tab */}
-        <div className={activeTab === "action" ? "h-full overflow-y-auto overflow-x-hidden space-y-6 px-2" : "hidden"}>
+        <div
+          className={
+            activeTab === "action"
+              ? "h-full overflow-y-auto overflow-x-hidden px-4 py-3 space-y-6"
+              : "hidden"
+          }
+        >
           {/* Selected Item Properties (Contextual) */}
           {(!selectionType || selectionType === "stroke") && (
             <div
@@ -1546,6 +1560,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
           )}
         </div>
         {/* End Action Settings Tab */}
+      </div>
 
       {/* Bottom Static Section: Export */}
       <div className="p-3 border-t border-gray-200 bg-gray-50 shrink-0">
