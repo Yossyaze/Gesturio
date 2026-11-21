@@ -1244,19 +1244,19 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                         </button>
                       </div>
 
-                      {/* 角度プリセット */}
+                      {/* 角度プリセット（数値の昇順: 0 → 256 → 512 → 768） */}
                       <div className="grid grid-cols-4 gap-1 mb-2">
+                        <button
+                          onClick={() => onAngleChange(0)}
+                          className="py-1 border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded text-[10px] font-medium flex items-center justify-center transition-colors"
+                        >
+                          → (0)
+                        </button>
                         <button
                           onClick={() => onAngleChange(256)}
                           className="py-1 border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded text-[10px] font-medium flex items-center justify-center transition-colors"
                         >
                           ↑ (256)
-                        </button>
-                        <button
-                          onClick={() => onAngleChange(768)}
-                          className="py-1 border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded text-[10px] font-medium flex items-center justify-center transition-colors"
-                        >
-                          ↓ (768)
                         </button>
                         <button
                           onClick={() => onAngleChange(512)}
@@ -1265,10 +1265,10 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                           ← (512)
                         </button>
                         <button
-                          onClick={() => onAngleChange(0)}
+                          onClick={() => onAngleChange(768)}
                           className="py-1 border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded text-[10px] font-medium flex items-center justify-center transition-colors"
                         >
-                          → (0)
+                          ↓ (768)
                         </button>
                       </div>
 
