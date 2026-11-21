@@ -1202,7 +1202,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                           onPointerLeave={stopPress}
                           onContextMenu={(e) => e.preventDefault()}
                           className="p-1 px-2 flex items-center bg-white border border-gray-300 rounded hover:bg-gray-50 active:bg-gray-100 text-[10px] text-gray-600 transition-colors shadow-sm select-none"
-                          title="左回り (-1)"
+                          title="時計回り (-1)"
                         >
                           <svg
                             className="w-3.5 h-3.5 mr-1 text-purple-500"
@@ -1214,7 +1214,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                               strokeLinecap="round"
                               strokeLinejoin="round"
                               strokeWidth={2}
-                              d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
+                              d="M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6"
                             />
                           </svg>
                           -1
@@ -1225,7 +1225,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                           onPointerLeave={stopPress}
                           onContextMenu={(e) => e.preventDefault()}
                           className="p-1 px-2 flex items-center bg-white border border-gray-300 rounded hover:bg-gray-50 active:bg-gray-100 text-[10px] text-gray-600 transition-colors shadow-sm select-none"
-                          title="右回り (+1)"
+                          title="反時計回り (+1)"
                         >
                           +1
                           <svg
@@ -1238,7 +1238,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                               strokeLinecap="round"
                               strokeLinejoin="round"
                               strokeWidth={2}
-                              d="M21 10h-10a8 8 0 00-8 8v2M21 10l-6 6m6-6l-6-6"
+                              d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"
                             />
                           </svg>
                         </button>
@@ -1259,16 +1259,16 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
                           ↓ (768)
                         </button>
                         <button
-                          onClick={() => onAngleChange(0)}
-                          className="py-1 border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded text-[10px] font-medium flex items-center justify-center transition-colors"
-                        >
-                          ← (0)
-                        </button>
-                        <button
                           onClick={() => onAngleChange(512)}
                           className="py-1 border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded text-[10px] font-medium flex items-center justify-center transition-colors"
                         >
-                          → (512)
+                          ← (512)
+                        </button>
+                        <button
+                          onClick={() => onAngleChange(0)}
+                          className="py-1 border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded text-[10px] font-medium flex items-center justify-center transition-colors"
+                        >
+                          → (0)
                         </button>
                       </div>
 

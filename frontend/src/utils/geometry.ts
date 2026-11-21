@@ -76,7 +76,7 @@ export function resamplePath(points: Point[], dur: number): Point[] {
 }
 
 /**
- * 始点から終点への角度を 0〜1023（1024分割）の整数値で計算する。
+ * 引っ張り軌跡（始点→終点）から発射方向を算出し、真右=0・反時計回り増加の 0〜1023（1024分割）の整数値で返す。
  */
 export function calculateAngle(points: Point[]): number {
   if (points.length < 2) return 0;
@@ -84,7 +84,9 @@ export function calculateAngle(points: Point[]): number {
   const end = points[points.length - 1];
   const dx = end.x - start.x;
   const dy = end.y - start.y;
-  let angleRad = Math.atan2(dy, dx);
+  // 画面座標系（Y軸下向き）の引っ張りベクトル (dx, dy) の真逆が発射方向。
+  // 数学の単位円（Y軸上向き・真右0・反時計回り増加）へ変換すると (-dx, dy) になる。
+  let angleRad = Math.atan2(dy, -dx);
   if (angleRad < 0) angleRad += 2 * Math.PI;
   return Math.round((angleRad / (2 * Math.PI)) * 1024) % 1024;
 }
@@ -109,7 +111,8 @@ export function rotateStrokePoints(points: Point[], newAngleRaw: number): Point[
 
   const currentAngleRaw = calculateAngle(points);
   const diffRaw = newAngleRaw - currentAngleRaw;
-  const diffRad = (diffRaw / 1024) * 2 * Math.PI;
+  // 画面座標系（Y軸下向き）では正の回転角が時計回りになるため、反時計回り増加に合わせて符号反転する
+  const diffRad = -(diffRaw / 1024) * 2 * Math.PI;
 
   const end = points[points.length - 1];
   const pivot = { x: end.x, y: end.y };
